@@ -1,0 +1,14 @@
+{
+  "name": "kama-ze-oleh",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Static Hebrew grocery price guessing game with local data-prep scripts.",
+  "scripts": {
+    "build:catalog": "node scripts/build-static-catalog.js",
+    "build:popular": "node scripts/build-popular-catalog.js",
+    "prepare:deploy": "node scripts/build-static-catalog.js && node scripts/build-popular-catalog.js",
+    "import:prices": "node scripts/import-price-files.js",
+    "images:enrich": "node scripts/enrich-images-openfoodfacts.js"
+  }
+}

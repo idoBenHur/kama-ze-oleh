@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="משחק ניחוש מחירים למוצרי סופר, בעברית ובממשק נקי שמותאם למובייל."
+    />
+    <title>כמה זה עולה?</title>
+    <link rel="stylesheet" href="./styles.css?v=20260429-17" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">דלג לתוכן</a>
+    <div class="page-shell">
+      <header class="hero">
+        <h1 class="hero__title">כמה זה עולה?</h1>
+      </header>
+
+      <main id="main-content" class="game-shell">
+        <section class="hud" aria-label="מצב משחק">
+          <div class="hud__metric">
+            <span class="hud__label">סיבוב</span>
+            <strong id="round-indicator" class="hud__value">1/5</strong>
+          </div>
+
+          <div id="progress-dots" class="progress-dots" aria-hidden="true"></div>
+
+          <div class="hud__metric hud__metric--accent">
+            <span class="hud__label">ניקוד</span>
+            <strong id="total-score" class="hud__value">0</strong>
+          </div>
+        </section>
+
+        <section class="game-card" aria-labelledby="product-heading">
+          <section id="product-panel" class="product-panel" aria-labelledby="product-heading">
+            <div class="product-copy">
+              <strong id="chain-target" class="chain-badge">...</strong>
+              <h2 id="product-heading" class="product-name">...</h2>
+              <p id="product-meta" class="product-meta"></p>
+            </div>
+            <div id="product-visual" class="product-visual" aria-hidden="true"></div>
+          </section>
+
+          <form id="guess-form" class="guess-panel">
+            <div class="guess-panel__value">
+              <output id="guess-value" for="guess-slider">0 ₪</output>
+            </div>
+            <input
+              id="guess-slider"
+              class="guess-slider"
+              type="range"
+              min="0"
+              max="50"
+              step="0.1"
+              value="25"
+              aria-label="בחירת מחיר"
+            />
+            <div class="slider-scale" aria-hidden="true">
+              <span id="slider-min">0 ₪</span>
+              <span id="slider-max">50 ₪</span>
+            </div>
+            <button id="guess-submit" class="primary-button" type="submit">בדיקה</button>
+          </form>
+
+          <section
+            id="result-panel"
+            class="result-panel panel-hidden"
+            aria-live="polite"
+          >
+            <div class="result-reveal">
+              <div class="result-strip">
+                <div class="result-column">
+                  <span class="result-column__label">הניחוש שלך</span>
+                  <div class="result-chip">
+                    <strong id="guess-readout" class="result-chip__value">-</strong>
+                  </div>
+                  <p id="result-direction" class="result-direction reveal-step"></p>
+                </div>
+                <div class="result-center">
+                  <div id="result-score-slot" class="result-score-slot reveal-step">
+                    <div class="score-badge">
+                      <span class="score-badge__prefix">+</span>
+                      <strong id="round-score" class="score-badge__value">0</strong>
+                    </div>
+                  </div>
+                  <div id="result-gap" class="result-gap reveal-step">
+                    <span class="result-gap__label">פער</span>
+                    <strong id="difference-readout" class="result-gap__value">-</strong>
+                  </div>
+                </div>
+                <div class="result-column">
+                  <span class="result-column__label">מחיר אמיתי</span>
+                  <div class="result-chip">
+                    <strong id="actual-readout-side" class="result-chip__value">-</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <ul id="price-list" class="price-list reveal-step"></ul>
+
+            <button id="next-button" class="primary-button reveal-step" type="button">הבא</button>
+          </section>
+
+          <section
+            id="summary-panel"
+            class="summary-panel panel-hidden"
+            aria-live="polite"
+          >
+            <p class="summary-panel__label">סיום</p>
+            <p id="final-score" class="summary-panel__score">0</p>
+            <p id="summary-copy" class="summary-panel__copy">מתוך 500</p>
+            <div id="summary-rounds" class="summary-rounds"></div>
+            <button id="restart-button" class="primary-button" type="button">שוב</button>
+          </section>
+        </section>
+
+        <p id="catalog-updated" class="catalog-stamp"></p>
+      </main>
+    </div>
+
+    <script type="module" src="./app.js?v=20260429-17"></script>
+  </body>
+</html>
