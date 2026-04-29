@@ -5,6 +5,11 @@ const REVEAL_LIST_DELAY_MS = 220;
 const COUNT_SOUND_INTERVAL_MS = 50;
 const SLIDER_SOUND_INTERVAL_MS = 18;
 const SLIDER_SOUND_STEP_VALUE = 0.5;
+const WHOLE_GUESS_MIN = 0;
+const WHOLE_GUESS_MAX = 50;
+const FRACTION_GUESS_MIN = 0;
+const FRACTION_GUESS_MAX = 90;
+const FRACTION_GUESS_STEP = 10;
 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
 const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
@@ -30,6 +35,10 @@ const state = {
   revealSequenceId: 0,
   revealTimeouts: [],
   session: null,
+  guessDraft: {
+    whole: 25,
+    fraction: 90
+  },
   view: "loading"
 };
 
@@ -40,11 +49,12 @@ const elements = {
   differenceReadout: document.querySelector("#difference-readout"),
   finalScore: document.querySelector("#final-score"),
   guessForm: document.querySelector("#guess-form"),
+  guessFractionSlider: document.querySelector("#guess-fraction-slider"),
   resultGap: document.querySelector("#result-gap"),
   guessReadout: document.querySelector("#guess-readout"),
-  guessSlider: document.querySelector("#guess-slider"),
   guessSubmit: document.querySelector("#guess-submit"),
   guessValue: document.querySelector("#guess-value"),
+  guessWholeSlider: document.querySelector("#guess-whole-slider"),
   nextButton: document.querySelector("#next-button"),
   priceList: document.querySelector("#price-list"),
   productMeta: document.querySelector("#product-meta"),
@@ -58,8 +68,6 @@ const elements = {
   resultScoreSlot: document.querySelector("#result-score-slot"),
   roundIndicator: document.querySelector("#round-indicator"),
   roundScore: document.querySelector("#round-score"),
-  sliderMax: document.querySelector("#slider-max"),
-  sliderMin: document.querySelector("#slider-min"),
   summaryCopy: document.querySelector("#summary-copy"),
   summaryPanel: document.querySelector("#summary-panel"),
   summaryRounds: document.querySelector("#summary-rounds"),
@@ -302,15 +310,57 @@ function playSliderStep(progress) {
   source.stop(audioContext.currentTime + burstDurationSeconds + 0.01);
 }
 
+function clampWholeGuess(value) {
+  return Math.min(WHOLE_GUESS_MAX, Math.max(WHOLE_GUESS_MIN, Math.round(value)));
+}
+
+function clampFractionGuess(value, wholeGuess) {
+  if (wholeGuess >= WHOLE_GUESS_MAX) {
+    return 0;
+  }
+
+  const roundedValue = Math.round(value / FRACTION_GUESS_STEP) * FRACTION_GUESS_STEP;
+  return Math.min(FRACTION_GUESS_MAX, Math.max(FRACTION_GUESS_MIN, roundedValue));
+}
+
+function getCurrentGuessParts() {
+  const wholeGuess = clampWholeGuess(Number(elements.guessWholeSlider.value));
+  const fractionGuess = clampFractionGuess(Number(elements.guessFractionSlider.value), wholeGuess);
+
+  return {
+    whole: wholeGuess,
+    fraction: fractionGuess
+  };
+}
+
+function getCurrentGuessValue() {
+  const guessParts = getCurrentGuessParts();
+  return Number((guessParts.whole + guessParts.fraction / 100).toFixed(2));
+}
+
+function syncGuessControls(wholeGuess, fractionGuess) {
+  const safeWholeGuess = clampWholeGuess(wholeGuess);
+  const safeFractionGuess = clampFractionGuess(fractionGuess, safeWholeGuess);
+
+  elements.guessWholeSlider.value = String(safeWholeGuess);
+  elements.guessFractionSlider.value = String(safeFractionGuess);
+  elements.guessFractionSlider.disabled = safeWholeGuess >= WHOLE_GUESS_MAX;
+
+  state.guessDraft = {
+    whole: safeWholeGuess,
+    fraction: safeFractionGuess
+  };
+}
+
 function resetSliderSoundState(currentValue = null) {
   state.lastSliderSoundAt = 0;
   state.lastSliderSoundValue = currentValue;
 }
 
 function maybePlaySliderSound() {
-  const currentValue = Number(elements.guessSlider.value);
-  const min = Number(elements.guessSlider.min);
-  const max = Number(elements.guessSlider.max);
+  const currentValue = getCurrentGuessValue();
+  const min = WHOLE_GUESS_MIN;
+  const max = WHOLE_GUESS_MAX;
   const safeRange = max - min || 1;
   const normalizedProgress = (currentValue - min) / safeRange;
   const roundedValue =
@@ -488,8 +538,7 @@ function renderHud() {
 }
 
 function updateSliderValue() {
-  const currentValue = Number(elements.guessSlider.value);
-  elements.guessValue.textContent = formatCurrency(currentValue);
+  elements.guessValue.textContent = formatCurrency(getCurrentGuessValue());
 }
 
 function renderProductFallback(product) {
@@ -514,6 +563,8 @@ function renderProductFallback(product) {
 }
 
 function handleSliderInput() {
+  const guessParts = getCurrentGuessParts();
+  syncGuessControls(guessParts.whole, guessParts.fraction);
   updateSliderValue();
   maybePlaySliderSound();
 }
@@ -568,10 +619,12 @@ function renderProductVisual(product) {
 
 function createSliderRange() {
   return {
-    min: 0,
-    max: 50,
-    step: 0.1,
-    suggestedValue: 25
+    wholeMin: WHOLE_GUESS_MIN,
+    wholeMax: WHOLE_GUESS_MAX,
+    wholeStep: 1,
+    fractionMin: FRACTION_GUESS_MIN,
+    fractionMax: FRACTION_GUESS_MAX,
+    fractionStep: FRACTION_GUESS_STEP
   };
 }
 
@@ -635,16 +688,19 @@ function renderRound(round) {
     .filter(Boolean)
     .join(" · ");
 
+  resetRevealSequenceUI();
+  elements.priceList.replaceChildren();
   renderProductVisual(round.product);
 
-  elements.guessSlider.min = String(round.slider.min);
-  elements.guessSlider.max = String(round.slider.max);
-  elements.guessSlider.step = String(round.slider.step);
-  elements.guessSlider.value = String(round.slider.suggestedValue);
-  elements.sliderMin.textContent = formatCurrency(round.slider.min);
-  elements.sliderMax.textContent = formatCurrency(round.slider.max);
+  elements.guessWholeSlider.min = String(round.slider.wholeMin);
+  elements.guessWholeSlider.max = String(round.slider.wholeMax);
+  elements.guessWholeSlider.step = String(round.slider.wholeStep);
+  elements.guessFractionSlider.min = String(round.slider.fractionMin);
+  elements.guessFractionSlider.max = String(round.slider.fractionMax);
+  elements.guessFractionSlider.step = String(round.slider.fractionStep);
+  syncGuessControls(state.guessDraft.whole, state.guessDraft.fraction);
   updateSliderValue();
-  resetSliderSoundState(round.slider.suggestedValue);
+  resetSliderSoundState(getCurrentGuessValue());
 
   show(elements.productPanel);
   show(elements.guessForm);
@@ -832,8 +888,10 @@ async function initializeApp() {
   }
 }
 
-elements.guessSlider.addEventListener("input", handleSliderInput);
-elements.guessSlider.addEventListener("pointerdown", () => resetSliderSoundState(null));
+elements.guessWholeSlider.addEventListener("input", handleSliderInput);
+elements.guessFractionSlider.addEventListener("input", handleSliderInput);
+elements.guessWholeSlider.addEventListener("pointerdown", () => resetSliderSoundState(null));
+elements.guessFractionSlider.addEventListener("pointerdown", () => resetSliderSoundState(null));
 
 elements.guessForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -841,7 +899,7 @@ elements.guessForm.addEventListener("submit", (event) => {
     return;
   }
 
-  const guessValue = Number(elements.guessSlider.value);
+  const guessValue = getCurrentGuessValue();
   const reveal = resolveRound(guessValue);
   if (!reveal) {
     return;

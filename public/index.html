@@ -8,15 +8,11 @@
       content="משחק ניחוש מחירים למוצרי סופר, בעברית ובממשק נקי שמותאם למובייל."
     />
     <title>כמה זה עולה?</title>
-    <link rel="stylesheet" href="./styles.css?v=20260429-17" />
+    <link rel="stylesheet" href="./styles.css?v=20260429-25" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">דלג לתוכן</a>
     <div class="page-shell">
-      <header class="hero">
-        <h1 class="hero__title">כמה זה עולה?</h1>
-      </header>
-
       <main id="main-content" class="game-shell">
         <section class="hud" aria-label="מצב משחק">
           <div class="hud__metric">
@@ -24,7 +20,10 @@
             <strong id="round-indicator" class="hud__value">1/5</strong>
           </div>
 
-          <div id="progress-dots" class="progress-dots" aria-hidden="true"></div>
+          <div class="hud__center">
+            <h1 class="hud__title">כמה זה עולה?</h1>
+            <div id="progress-dots" class="progress-dots" aria-hidden="true"></div>
+          </div>
 
           <div class="hud__metric hud__metric--accent">
             <span class="hud__label">ניקוד</span>
@@ -39,28 +38,57 @@
               <h2 id="product-heading" class="product-name">...</h2>
               <p id="product-meta" class="product-meta"></p>
             </div>
-            <div id="product-visual" class="product-visual" aria-hidden="true"></div>
+            <div class="product-stage">
+              <ul id="price-list" class="price-list price-list--overlay reveal-step"></ul>
+              <div id="product-visual" class="product-visual" aria-hidden="true"></div>
+            </div>
           </section>
 
           <form id="guess-form" class="guess-panel">
             <div class="guess-panel__value">
-              <output id="guess-value" for="guess-slider">0 ₪</output>
+              <output id="guess-value" for="guess-whole-slider guess-fraction-slider">0 ₪</output>
             </div>
-            <input
-              id="guess-slider"
-              class="guess-slider"
-              type="range"
-              min="0"
-              max="50"
-              step="0.1"
-              value="25"
-              aria-label="בחירת מחיר"
-            />
-            <div class="slider-scale" aria-hidden="true">
-              <span id="slider-min">0 ₪</span>
-              <span id="slider-max">50 ₪</span>
+            <div class="guess-slider-stack">
+              <div class="guess-slider-group">
+                <div class="guess-slider-head">
+                  <span class="guess-slider-head__label">שקלים</span>
+                </div>
+                <input
+                  id="guess-whole-slider"
+                  class="guess-slider"
+                  type="range"
+                  min="0"
+                  max="50"
+                  step="1"
+                  value="25"
+                  aria-label="בחירת שקלים"
+                />
+              </div>
+
+              <div class="guess-slider-group">
+                <div class="guess-slider-head">
+                  <span class="guess-slider-head__label">אגורות</span>
+                </div>
+                <input
+                  id="guess-fraction-slider"
+                  class="guess-slider"
+                  type="range"
+                  min="0"
+                  max="90"
+                  step="10"
+                  value="90"
+                  aria-label="בחירת אגורות"
+                />
+              </div>
             </div>
-            <button id="guess-submit" class="primary-button" type="submit">בדיקה</button>
+            <button
+              id="guess-submit"
+              class="primary-button"
+              type="submit"
+              aria-label="לגלות"
+            >
+              ←
+            </button>
           </form>
 
           <section
@@ -98,8 +126,6 @@
               </div>
             </div>
 
-            <ul id="price-list" class="price-list reveal-step"></ul>
-
             <button id="next-button" class="primary-button reveal-step" type="button">הבא</button>
           </section>
 
@@ -112,7 +138,7 @@
             <p id="final-score" class="summary-panel__score">0</p>
             <p id="summary-copy" class="summary-panel__copy">מתוך 500</p>
             <div id="summary-rounds" class="summary-rounds"></div>
-            <button id="restart-button" class="primary-button" type="button">שוב</button>
+            <button id="restart-button" class="primary-button" type="button">שחק שוב</button>
           </section>
         </section>
 
@@ -120,6 +146,6 @@
       </main>
     </div>
 
-    <script type="module" src="./app.js?v=20260429-17"></script>
+    <script type="module" src="./app.js?v=20260429-24"></script>
   </body>
 </html>
