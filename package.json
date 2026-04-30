@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Static Hebrew grocery price guessing game with local data-prep scripts.",
   "scripts": {
-    "build": "node scripts/build-runtime-config.js && node scripts/build-static-catalog.js && node scripts/build-popular-catalog.js",
+    "build": "node scripts/build-runtime-config.js",
     "build:catalog": "node scripts/build-static-catalog.js",
     "build:popular": "node scripts/build-popular-catalog.js",
     "build:runtime-config": "node scripts/build-runtime-config.js",

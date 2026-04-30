@@ -737,6 +737,19 @@ function renderSummaryBest(totalScore, isNewLocalBest) {
   elements.personalBestCopy.textContent = "";
 }
 
+async function resolveFunctionErrorMessage(fallbackMessage, error) {
+  if (error?.name === "FunctionsHttpError" && error.context) {
+    try {
+      const errorBody = await error.context.json();
+      if (typeof errorBody?.error === "string" && errorBody.error) {
+        return errorBody.error;
+      }
+    } catch {}
+  }
+
+  return fallbackMessage;
+}
+
 function openNameModal(mode) {
   state.pendingNameAction = mode;
   elements.nameError.textContent = "";
@@ -914,7 +927,8 @@ async function submitLeaderboardScore(displayNameOverride = null) {
 
   if (error || !data?.accepted) {
     const message = data?.error ?? error?.message ?? "שליחת התוצאה נכשלה.";
-    setLeaderboardFeedback(message, "error");
+    const finalMessage = await resolveFunctionErrorMessage(message, error);
+    setLeaderboardFeedback(finalMessage, "error");
     renderLeaderboardControls();
     return;
   }
@@ -1020,6 +1034,8 @@ function renderProductVisual(product) {
     image.loading = "eager";
     image.decoding = "async";
     image.fetchPriority = "high";
+    image.referrerPolicy = "no-referrer";
+    image.crossOrigin = "anonymous";
 
     const revealImage = () => {
       if (!image.isConnected) {
