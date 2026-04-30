@@ -36,6 +36,7 @@ const dateFormatter = new Intl.DateTimeFormat("he-IL", {
 const state = {
   catalog: null,
   currentRound: null,
+  currentReveal: null,
   audioContext: null,
   lastSliderSoundAt: 0,
   lastSliderSoundValue: null,
@@ -871,10 +872,8 @@ function renderLeaderboardPanel() {
     elements.leaderboardProfile.textContent = hasDisplayName
       ? "יש שיא מקומי שמחכה לסנכרון. ננסה שוב אוטומטית."
       : "בחרו שם כדי שנוכל לסנכרן את השיא המקומי שלכם.";
-  } else if (hasDisplayName) {
-    elements.leaderboardProfile.textContent = `נרשם כ: ${state.playerProfile.displayName}`;
   } else {
-    elements.leaderboardProfile.textContent = "עדיין לא נשמר שם לשחקן הזה.";
+    elements.leaderboardProfile.textContent = "";
   }
 
   renderLeaderboardFeedback();
@@ -1087,10 +1086,6 @@ async function loadLeaderboardData({ triggerPendingSync = true } = {}) {
   syncLeaderboardProfileFromRows(data);
   state.leaderboardEntries = data.slice(0, LEADERBOARD_LIMIT);
 
-  if (!state.leaderboardFeedback && state.playerProfile.leaderboardProfile?.rank) {
-    setLeaderboardFeedback(`המקום האחרון שלך: #${state.playerProfile.leaderboardProfile.rank}`);
-  }
-
   renderLeaderboardPanel();
   renderLeaderboardList();
 }
@@ -1235,13 +1230,8 @@ function renderProgressDots() {
   elements.progressDots.replaceChildren();
 
   const completed = state.session?.results.length ?? 0;
-  const leaderboardFromGuess = state.view === "leaderboard" && state.leaderboardReturnView === "guess";
-  const activeIndex =
-    state.view === "guess" || leaderboardFromGuess
-      ? completed
-      : state.view === "reveal"
-        ? Math.max(completed - 1, 0)
-        : -1;
+  const effectiveView = state.view === "leaderboard" ? state.leaderboardReturnView : state.view;
+  const activeIndex = effectiveView === "guess" ? completed : -1;
 
   for (let index = 0; index < SESSION_ROUNDS; index += 1) {
     const dot = document.createElement("span");
@@ -1251,7 +1241,7 @@ function renderProgressDots() {
       dot.classList.add("progress-dots__item--done");
     }
 
-    if (index === activeIndex && state.view === "guess") {
+    if (index === activeIndex && effectiveView === "guess") {
       dot.classList.add("progress-dots__item--active");
     }
 
@@ -1261,15 +1251,15 @@ function renderProgressDots() {
 
 function renderHud() {
   const completed = state.session?.results.length ?? 0;
-  const leaderboardFromGuess = state.view === "leaderboard" && state.leaderboardReturnView === "guess";
+  const effectiveView = state.view === "leaderboard" ? state.leaderboardReturnView : state.view;
   const roundNumber =
-    state.view === "guess" || leaderboardFromGuess
+    effectiveView === "guess"
       ? Math.min(completed + 1, SESSION_ROUNDS)
-      : Math.min(completed, SESSION_ROUNDS);
+      : Math.min(Math.max(completed, 1), SESSION_ROUNDS);
 
   elements.roundIndicator.textContent = `${Math.max(roundNumber, 1)}/${SESSION_ROUNDS}`;
   elements.totalScore.textContent = String(state.session?.totalScore ?? 0);
-  if (state.view === "guess") {
+  if (state.view !== "leaderboard" && (state.view === "guess" || state.view === "reveal")) {
     show(elements.hudLeaderboardButton);
   } else {
     hide(elements.hudLeaderboardButton);
@@ -1422,6 +1412,7 @@ function createRoundFromCatalog(catalog, usedProductIds) {
 function renderRound(round) {
   cancelRevealSequence();
   state.currentRound = round;
+  state.currentReveal = null;
   state.view = "guess";
   state.leaderboardReturnView = null;
 
@@ -1457,6 +1448,7 @@ function renderRound(round) {
 
 function renderReveal(reveal) {
   cancelRevealSequence();
+  state.currentReveal = reveal;
   state.view = "reveal";
   state.leaderboardReturnView = null;
 
@@ -1565,6 +1557,10 @@ function renderSummary() {
 }
 
 function openLeaderboardPanel(fromView) {
+  if (fromView === "reveal") {
+    cancelRevealSequence();
+  }
+
   state.leaderboardReturnView = fromView;
   state.view = "leaderboard";
 
@@ -1583,6 +1579,11 @@ function openLeaderboardPanel(fromView) {
 function returnFromLeaderboard() {
   if (state.leaderboardReturnView === "guess" && state.currentRound) {
     renderRound(state.currentRound);
+    return;
+  }
+
+  if (state.leaderboardReturnView === "reveal" && state.currentReveal) {
+    renderReveal(state.currentReveal);
     return;
   }
 
@@ -1740,7 +1741,7 @@ elements.restartButton.addEventListener("click", () => {
 
 elements.hudLeaderboardButton.addEventListener("click", () => {
   playClickSound();
-  openLeaderboardPanel("guess");
+  openLeaderboardPanel(state.view === "reveal" ? "reveal" : "guess");
 });
 
 elements.summaryLeaderboardButton.addEventListener("click", () => {

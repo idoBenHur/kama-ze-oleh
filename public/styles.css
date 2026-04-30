@@ -98,6 +98,12 @@ output {
   text-align: left;
 }
 
+.hud__score-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+}
+
 .hud__label {
   display: block;
   color: var(--muted);
@@ -118,13 +124,18 @@ output {
 }
 
 .hud__leaderboard-button {
-  min-height: 1.5rem;
-  padding-inline: 0.7rem;
-  border-radius: var(--radius-sm);
+  width: 1.95rem;
+  height: 1.95rem;
+  padding: 0;
+  border-radius: 50%;
   background: rgba(88, 199, 132, 0.12);
-  border: 1px solid rgba(139, 224, 172, 0.14);
+  border: 1px solid rgba(139, 224, 172, 0.18);
   color: var(--accent-strong);
-  font-size: 0.76rem;
+  display: inline-grid;
+  place-items: center;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .hud__title {
@@ -383,6 +394,18 @@ output {
   border-radius: var(--radius-sm);
   background: rgba(88, 199, 132, 0.12);
   color: var(--text);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mini-button {
+  min-height: 2.2rem;
+  padding-inline: 0.95rem;
+  border: 1px solid rgba(139, 224, 172, 0.2);
+  border-radius: var(--radius-sm);
+  background: rgba(88, 199, 132, 0.12);
+  color: var(--text);
+  font-size: 0.82rem;
   font-weight: 700;
   cursor: pointer;
 }
@@ -747,10 +770,15 @@ output {
 
 .leaderboard-screen__header {
   display: flex;
-  align-items: start;
+  align-items: center;
   justify-content: space-between;
   gap: 0.85rem;
   text-align: right;
+}
+
+.leaderboard-screen__title {
+  margin: 0;
+  font-size: 1.16rem;
 }
 
 .leaderboard-card {
@@ -787,13 +815,13 @@ output {
 
 .leaderboard-player-card__header {
   display: flex;
-  align-items: start;
+  align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
 }
 
 .leaderboard-player-card__title {
-  margin: 0.18rem 0 0;
+  margin: 0;
   font-size: 1.12rem;
 }
 
@@ -827,10 +855,14 @@ output {
 
 .leaderboard-profile,
 .leaderboard-feedback {
-  min-height: 1.2rem;
   margin: 0.7rem 0 0;
   color: var(--muted);
   font-size: 0.84rem;
+}
+
+.leaderboard-profile:empty,
+.leaderboard-feedback:empty {
+  display: none;
 }
 
 .leaderboard-feedback {
@@ -844,7 +876,7 @@ output {
 .leaderboard-list {
   list-style: none;
   padding: 0;
-  margin: 0.9rem 0 0;
+  margin: 0;
   display: grid;
   gap: 0.45rem;
 }
