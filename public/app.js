@@ -942,7 +942,7 @@ function renderSummaryBest(totalScore, isNewLocalBest) {
   }
 
   if (state.playerProfile.personalBest > 0 && totalScore < state.playerProfile.personalBest) {
-    elements.personalBestCopy.textContent = "השיא המקומי נשמר כאן במכשיר.";
+    elements.personalBestCopy.textContent = "";
     return;
   }
 
