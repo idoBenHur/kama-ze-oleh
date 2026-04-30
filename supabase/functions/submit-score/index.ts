@@ -1,10 +1,13 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
-import { corsHeaders } from "../_shared/cors.ts";
-
 const DISPLAY_NAME_PATTERN = /^[\p{L}\p{N}_ -]+$/u;
 const SESSION_ROUNDS = 5;
 const MAX_SCORE = 500;
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS"
+};
 
 type ScoreRound = {
   roundNumber?: number;
