@@ -48,7 +48,9 @@ alter table public.score_submissions enable row level security;
 
 revoke all on public.player_profiles from anon, authenticated;
 revoke all on public.score_submissions from anon, authenticated;
-grant select, insert, update on public.player_profiles to authenticated;
+grant usage on schema public to authenticated, service_role;
+grant select, insert, update on public.player_profiles to authenticated, service_role;
+grant insert on public.score_submissions to service_role;
 
 drop policy if exists "profiles_select_own" on public.player_profiles;
 create policy "profiles_select_own"
@@ -84,4 +86,4 @@ where player_profiles.display_name is not null
   and player_profiles.best_score_at is not null;
 
 revoke all on public.public_leaderboard from anon, authenticated;
-grant select on public.public_leaderboard to authenticated;
+grant select on public.public_leaderboard to authenticated, service_role;
