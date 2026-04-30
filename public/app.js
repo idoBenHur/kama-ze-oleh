@@ -10,6 +10,14 @@ const WHOLE_GUESS_MAX = 50;
 const FRACTION_GUESS_MIN = 0;
 const FRACTION_GUESS_MAX = 90;
 const FRACTION_GUESS_STEP = 10;
+const LEADERBOARD_LIMIT = 10;
+const LOCAL_STORAGE_KEYS = {
+  displayName: "kzo.displayName",
+  personalBest: "kzo.personalBest",
+  lastLeaderboardResult: "kzo.lastLeaderboardResult"
+};
+const SUPABASE_FUNCTION_NAME = "submit-score";
+const DISPLAY_NAME_PATTERN = /^[\p{L}\p{N}_ -]+$/u;
 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
 const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
@@ -39,6 +47,23 @@ const state = {
     whole: 25,
     fraction: 90
   },
+  supabaseClient: null,
+  supabaseEnabled: false,
+  supabaseInitPromise: null,
+  supabaseReady: false,
+  supabaseUserId: null,
+  leaderboardEntries: [],
+  leaderboardLoading: false,
+  leaderboardSubmitting: false,
+  leaderboardFeedback: "",
+  leaderboardFeedbackTone: "neutral",
+  pendingNameAction: null,
+  playerProfile: {
+    displayName: "",
+    personalBest: 0,
+    personalBestAt: "",
+    lastLeaderboardResult: null
+  },
   view: "loading"
 };
 
@@ -46,6 +71,7 @@ const elements = {
   actualReadoutSide: document.querySelector("#actual-readout-side"),
   catalogUpdated: document.querySelector("#catalog-updated"),
   chainTarget: document.querySelector("#chain-target"),
+  displayNameInput: document.querySelector("#display-name-input"),
   differenceReadout: document.querySelector("#difference-readout"),
   finalScore: document.querySelector("#final-score"),
   guessForm: document.querySelector("#guess-form"),
@@ -62,6 +88,21 @@ const elements = {
   productPanel: document.querySelector("#product-panel"),
   productVisual: document.querySelector("#product-visual"),
   progressDots: document.querySelector("#progress-dots"),
+  leaderboardEditNameButton: document.querySelector("#leaderboard-edit-name-button"),
+  leaderboardFeedback: document.querySelector("#leaderboard-feedback"),
+  leaderboardList: document.querySelector("#leaderboard-list"),
+  leaderboardProfile: document.querySelector("#leaderboard-profile"),
+  leaderboardSubmitButton: document.querySelector("#leaderboard-submit-button"),
+  nameCancelButton: document.querySelector("#name-cancel-button"),
+  nameError: document.querySelector("#name-error"),
+  nameForm: document.querySelector("#name-form"),
+  nameModal: document.querySelector("#name-modal"),
+  nameModalBackdrop: document.querySelector("#name-modal-backdrop"),
+  nameModalCopy: document.querySelector("#name-modal-copy"),
+  nameModalTitle: document.querySelector("#name-modal-title"),
+  nameSaveButton: document.querySelector("#name-save-button"),
+  personalBestCopy: document.querySelector("#personal-best-copy"),
+  personalBestScore: document.querySelector("#personal-best-score"),
   restartButton: document.querySelector("#restart-button"),
   resultDirection: document.querySelector("#result-direction"),
   resultPanel: document.querySelector("#result-panel"),
@@ -89,6 +130,104 @@ function formatDate(dateValue) {
   }
 
   return dateFormatter.format(parsed);
+}
+
+function getRuntimeConfig() {
+  const appConfig = window.__APP_CONFIG__ ?? {};
+
+  return {
+    supabaseUrl: typeof appConfig.supabaseUrl === "string" ? appConfig.supabaseUrl : "",
+    supabasePublishableKey:
+      typeof appConfig.supabasePublishableKey === "string" ? appConfig.supabasePublishableKey : ""
+  };
+}
+
+function readStoredJson(key, fallbackValue) {
+  try {
+    const rawValue = window.localStorage.getItem(key);
+    if (!rawValue) {
+      return fallbackValue;
+    }
+
+    return JSON.parse(rawValue);
+  } catch {
+    return fallbackValue;
+  }
+}
+
+function writeStoredJson(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
+function normalizeDisplayName(displayName) {
+  return displayName.trim().replace(/\s+/g, " ");
+}
+
+function validateDisplayName(displayName) {
+  const normalized = normalizeDisplayName(displayName);
+
+  if (normalized.length < 2 || normalized.length > 20) {
+    return { error: "בחרו שם באורך 2-20 תווים." };
+  }
+
+  if (!DISPLAY_NAME_PATTERN.test(normalized)) {
+    return { error: "אפשר להשתמש בעברית, אנגלית, מספרים, רווחים, _ ו--." };
+  }
+
+  return { normalized };
+}
+
+function loadLocalPlayerProfile() {
+  const personalBestRecord = readStoredJson(LOCAL_STORAGE_KEYS.personalBest, null);
+  const lastLeaderboardResult = readStoredJson(LOCAL_STORAGE_KEYS.lastLeaderboardResult, null);
+
+  try {
+    state.playerProfile.displayName =
+      window.localStorage.getItem(LOCAL_STORAGE_KEYS.displayName) ?? "";
+  } catch {
+    state.playerProfile.displayName = "";
+  }
+
+  state.playerProfile.personalBest =
+    typeof personalBestRecord?.score === "number" ? personalBestRecord.score : 0;
+  state.playerProfile.personalBestAt =
+    typeof personalBestRecord?.achievedAt === "string" ? personalBestRecord.achievedAt : "";
+  state.playerProfile.lastLeaderboardResult =
+    lastLeaderboardResult && typeof lastLeaderboardResult === "object" ? lastLeaderboardResult : null;
+}
+
+function persistDisplayName(displayName) {
+  state.playerProfile.displayName = displayName;
+
+  try {
+    window.localStorage.setItem(LOCAL_STORAGE_KEYS.displayName, displayName);
+  } catch {}
+}
+
+function updateLocalPersonalBest(score) {
+  const achievedAt = new Date().toISOString();
+  const previousBest = state.playerProfile.personalBest;
+  const isNewLocalBest = score > previousBest;
+
+  if (!isNewLocalBest) {
+    return false;
+  }
+
+  state.playerProfile.personalBest = score;
+  state.playerProfile.personalBestAt = achievedAt;
+  writeStoredJson(LOCAL_STORAGE_KEYS.personalBest, {
+    score,
+    achievedAt
+  });
+
+  return true;
+}
+
+function storeLastLeaderboardResult(result) {
+  state.playerProfile.lastLeaderboardResult = result;
+  writeStoredJson(LOCAL_STORAGE_KEYS.lastLeaderboardResult, result);
 }
 
 function hide(element) {
@@ -504,6 +643,304 @@ function renderCatalogStamp() {
   elements.catalogUpdated.textContent = formattedDate ? `עודכן ${formattedDate}` : "";
 }
 
+function setLeaderboardFeedback(message, tone = "neutral") {
+  state.leaderboardFeedback = message;
+  state.leaderboardFeedbackTone = tone;
+  elements.leaderboardFeedback.textContent = message;
+  elements.leaderboardFeedback.className = "leaderboard-feedback";
+
+  if (tone === "error") {
+    elements.leaderboardFeedback.classList.add("leaderboard-feedback--error");
+  }
+}
+
+function renderLeaderboardList() {
+  elements.leaderboardList.replaceChildren();
+
+  if (state.leaderboardLoading) {
+    const item = document.createElement("li");
+    item.className = "leaderboard-item";
+    item.textContent = "טוען את טבלת השיאים...";
+    elements.leaderboardList.append(item);
+    return;
+  }
+
+  if (!state.leaderboardEntries.length) {
+    const item = document.createElement("li");
+    item.className = "leaderboard-item";
+    item.textContent = state.supabaseEnabled
+      ? "עוד אין תוצאות בטבלה."
+      : "טבלת השיאים תהיה זמינה אחרי חיבור ל-Supabase.";
+    elements.leaderboardList.append(item);
+    return;
+  }
+
+  state.leaderboardEntries.forEach((entry, index) => {
+    const item = document.createElement("li");
+    item.className = "leaderboard-item";
+
+    if (entry.player_id === state.supabaseUserId) {
+      item.classList.add("leaderboard-item--current");
+    }
+
+    const rank = document.createElement("span");
+    rank.className = "leaderboard-item__rank";
+    rank.textContent = `#${index + 1}`;
+
+    const name = document.createElement("span");
+    name.className = "leaderboard-item__name";
+    name.textContent = entry.display_name;
+
+    const score = document.createElement("strong");
+    score.className = "leaderboard-item__score";
+    score.textContent = `${entry.best_score} נק׳`;
+
+    item.append(rank, name, score);
+    elements.leaderboardList.append(item);
+  });
+}
+
+function renderLeaderboardControls() {
+  const hasDisplayName = Boolean(state.playerProfile.displayName);
+
+  if (!state.supabaseEnabled) {
+    elements.leaderboardProfile.textContent = "הטבלה תופעל אחרי חיבור ל-Supabase.";
+  } else if (hasDisplayName) {
+    elements.leaderboardProfile.textContent = `נרשם כ: ${state.playerProfile.displayName}`;
+  } else {
+    elements.leaderboardProfile.textContent = "נבקש שם רק כשתרצו לשלוח תוצאה.";
+  }
+
+  elements.leaderboardSubmitButton.textContent = state.leaderboardSubmitting
+    ? "שולח..."
+    : hasDisplayName
+      ? "עדכן בטבלה"
+      : "שלח לטבלה";
+  elements.leaderboardSubmitButton.disabled = !state.supabaseEnabled || state.leaderboardSubmitting;
+
+  elements.leaderboardEditNameButton.textContent = hasDisplayName ? "ערוך שם" : "הוסף שם";
+}
+
+function renderSummaryBest(totalScore, isNewLocalBest) {
+  elements.personalBestScore.textContent = String(state.playerProfile.personalBest);
+
+  if (isNewLocalBest) {
+    elements.personalBestCopy.textContent = "שיא אישי חדש במכשיר הזה!";
+    return;
+  }
+
+  if (state.playerProfile.personalBest > 0 && totalScore < state.playerProfile.personalBest) {
+    elements.personalBestCopy.textContent = "השיא המקומי נשמר כאן במכשיר.";
+    return;
+  }
+
+  elements.personalBestCopy.textContent = "";
+}
+
+function openNameModal(mode) {
+  state.pendingNameAction = mode;
+  elements.nameError.textContent = "";
+  elements.displayNameInput.value = state.playerProfile.displayName;
+
+  if (mode === "submit") {
+    elements.nameModalTitle.textContent = "איך נרשום אותך?";
+    elements.nameModalCopy.textContent = "השם יישמר במכשיר הזה וישמש אותך גם בפעם הבאה.";
+    elements.nameSaveButton.textContent = "שמור ושלח";
+  } else {
+    elements.nameModalTitle.textContent = "עדכון שם";
+    elements.nameModalCopy.textContent = "אפשר לעדכן את השם המקומי שלך לפני השליחה הבאה.";
+    elements.nameSaveButton.textContent = "שמור שם";
+  }
+
+  show(elements.nameModal);
+  window.requestAnimationFrame(() => {
+    elements.displayNameInput.focus();
+    elements.displayNameInput.select();
+  });
+}
+
+function closeNameModal() {
+  state.pendingNameAction = null;
+  elements.nameError.textContent = "";
+  hide(elements.nameModal);
+}
+
+async function ensureSupabaseClient() {
+  if (state.supabaseInitPromise) {
+    return state.supabaseInitPromise;
+  }
+
+  const runtimeConfig = getRuntimeConfig();
+  const createClient = window.supabase?.createClient;
+
+  if (!runtimeConfig.supabaseUrl || !runtimeConfig.supabasePublishableKey || !createClient) {
+    state.supabaseEnabled = false;
+    renderLeaderboardControls();
+    renderLeaderboardList();
+    return null;
+  }
+
+  state.supabaseEnabled = true;
+  state.supabaseInitPromise = (async () => {
+    const client = createClient(runtimeConfig.supabaseUrl, runtimeConfig.supabasePublishableKey, {
+      auth: {
+        autoRefreshToken: true,
+        persistSession: true,
+        storageKey: "kzo.supabase.auth"
+      }
+    });
+
+    client.auth.onAuthStateChange((_event, session) => {
+      state.supabaseUserId = session?.user?.id ?? null;
+    });
+
+    const {
+      data: { session }
+    } = await client.auth.getSession();
+
+    if (!session) {
+      const { error } = await client.auth.signInAnonymously();
+      if (error) {
+        throw error;
+      }
+    }
+
+    const {
+      data: { user },
+      error: userError
+    } = await client.auth.getUser();
+
+    if (userError) {
+      throw userError;
+    }
+
+    state.supabaseClient = client;
+    state.supabaseReady = true;
+    state.supabaseUserId = user?.id ?? null;
+    renderLeaderboardControls();
+
+    return client;
+  })().catch((error) => {
+    state.supabaseEnabled = false;
+    state.supabaseReady = false;
+    state.supabaseInitPromise = null;
+    setLeaderboardFeedback("לא הצלחתי להתחבר לטבלת השיאים כרגע.", "error");
+    console.error(error);
+    return null;
+  });
+
+  return state.supabaseInitPromise;
+}
+
+async function loadLeaderboardPreview() {
+  state.leaderboardLoading = true;
+  renderLeaderboardControls();
+  renderLeaderboardList();
+
+  const client = await ensureSupabaseClient();
+  if (!client) {
+    state.leaderboardLoading = false;
+    renderLeaderboardControls();
+    renderLeaderboardList();
+    return;
+  }
+
+  const { data, error } = await client
+    .from("public_leaderboard")
+    .select("player_id, display_name, best_score, best_score_at")
+    .order("best_score", { ascending: false })
+    .order("best_score_at", { ascending: true })
+    .limit(LEADERBOARD_LIMIT);
+
+  state.leaderboardLoading = false;
+
+  if (error) {
+    state.leaderboardEntries = [];
+    setLeaderboardFeedback("לא הצלחתי לטעון את טבלת השיאים.", "error");
+    renderLeaderboardControls();
+    renderLeaderboardList();
+    return;
+  }
+
+  state.leaderboardEntries = data ?? [];
+
+  if (!state.leaderboardFeedback && state.playerProfile.lastLeaderboardResult?.leaderboardRank) {
+    setLeaderboardFeedback(
+      `המקום האחרון שלך: #${state.playerProfile.lastLeaderboardResult.leaderboardRank}`
+    );
+  }
+
+  renderLeaderboardControls();
+  renderLeaderboardList();
+}
+
+function buildSubmissionRounds() {
+  return (state.session?.results ?? []).map((result) => ({
+    roundNumber: result.roundNumber,
+    roundScore: result.roundScore,
+    productId: result.productId,
+    productNameHe: result.productNameHe
+  }));
+}
+
+async function submitLeaderboardScore(displayNameOverride = null) {
+  if (!state.session || state.leaderboardSubmitting) {
+    return;
+  }
+
+  const client = await ensureSupabaseClient();
+  if (!client) {
+    setLeaderboardFeedback("טבלת השיאים לא זמינה כרגע.", "error");
+    return;
+  }
+
+  state.leaderboardSubmitting = true;
+  setLeaderboardFeedback("");
+  renderLeaderboardControls();
+
+  const displayName = displayNameOverride ?? state.playerProfile.displayName;
+  const payload = {
+    score: state.session.totalScore,
+    rounds: buildSubmissionRounds(),
+    catalogUpdatedAt: state.catalog?.meta?.updatedAt ?? null,
+    ...(displayName ? { displayName } : {})
+  };
+
+  const { data, error } = await client.functions.invoke(SUPABASE_FUNCTION_NAME, {
+    body: payload
+  });
+
+  state.leaderboardSubmitting = false;
+
+  if (error || !data?.accepted) {
+    const message = data?.error ?? error?.message ?? "שליחת התוצאה נכשלה.";
+    setLeaderboardFeedback(message, "error");
+    renderLeaderboardControls();
+    return;
+  }
+
+  if (typeof data.displayName === "string" && data.displayName) {
+    persistDisplayName(data.displayName);
+  }
+
+  storeLastLeaderboardResult({
+    bestScore: data.bestScore,
+    leaderboardRank: data.leaderboardRank,
+    submittedAt: new Date().toISOString()
+  });
+
+  if (data.isNewBest && data.leaderboardRank) {
+    setLeaderboardFeedback(`שיא חדש! כרגע אתה במקום #${data.leaderboardRank}`);
+  } else if (data.leaderboardRank) {
+    setLeaderboardFeedback(`התוצאה נשמרה. כרגע אתה במקום #${data.leaderboardRank}`);
+  } else {
+    setLeaderboardFeedback("התוצאה נשמרה בטבלה.");
+  }
+
+  renderLeaderboardControls();
+  await loadLeaderboardPreview();
+}
+
 function renderProgressDots() {
   elements.progressDots.replaceChildren();
 
@@ -767,8 +1204,10 @@ function renderSummary() {
   state.currentRound = null;
 
   const totalScore = state.session.totalScore;
+  const isNewLocalBest = updateLocalPersonalBest(totalScore);
   elements.finalScore.textContent = String(totalScore);
   elements.summaryCopy.textContent = `מתוך ${SESSION_ROUNDS * 100}`;
+  renderSummaryBest(totalScore, isNewLocalBest);
 
   elements.summaryRounds.replaceChildren();
   for (const result of state.session.results) {
@@ -791,6 +1230,10 @@ function renderSummary() {
   hide(elements.guessForm);
   hide(elements.resultPanel);
   show(elements.summaryPanel);
+  renderLeaderboardControls();
+  renderLeaderboardList();
+  setLeaderboardFeedback("");
+  void loadLeaderboardPreview();
   renderHud();
 }
 
@@ -845,6 +1288,7 @@ async function loadCatalog() {
 
 function startNewGame() {
   cancelRevealSequence();
+  closeNameModal();
   state.session = {
     totalScore: 0,
     results: [],
@@ -876,10 +1320,14 @@ function startNextRound() {
 
 async function initializeApp() {
   elements.guessSubmit.disabled = true;
+  loadLocalPlayerProfile();
+  renderLeaderboardControls();
+  renderLeaderboardList();
 
   try {
     await loadCatalog();
     renderCatalogStamp();
+    void ensureSupabaseClient();
     startNewGame();
   } catch (error) {
     elements.catalogUpdated.textContent = error.message;
@@ -931,6 +1379,52 @@ elements.restartButton.addEventListener("click", () => {
   playClickSound();
   show(elements.productPanel);
   startNewGame();
+});
+
+elements.leaderboardSubmitButton.addEventListener("click", () => {
+  playClickSound();
+
+  if (!state.playerProfile.displayName) {
+    openNameModal("submit");
+    return;
+  }
+
+  void submitLeaderboardScore();
+});
+
+elements.leaderboardEditNameButton.addEventListener("click", () => {
+  playClickSound();
+  openNameModal("edit");
+});
+
+elements.nameCancelButton.addEventListener("click", () => {
+  closeNameModal();
+});
+
+elements.nameModalBackdrop.addEventListener("click", () => {
+  closeNameModal();
+});
+
+elements.nameForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+
+  const validation = validateDisplayName(elements.displayNameInput.value);
+  if ("error" in validation) {
+    elements.nameError.textContent = validation.error;
+    return;
+  }
+
+  const pendingNameAction = state.pendingNameAction;
+  persistDisplayName(validation.normalized);
+  renderLeaderboardControls();
+  closeNameModal();
+
+  if (pendingNameAction === "submit") {
+    void submitLeaderboardScore(validation.normalized);
+    return;
+  }
+
+  setLeaderboardFeedback("השם המקומי עודכן. הוא יישלח בפעם הבאה שתעדכן תוצאה.");
 });
 
 renderHud();

@@ -8,7 +8,7 @@
       content="בוא לבדוק האם אתה באמת יודע כמה דברים עולים בסופר."
     />
     <title>כמה זה עולה?</title>
-    <link rel="stylesheet" href="./styles.css?v=20260429-26" />
+    <link rel="stylesheet" href="./styles.css?v=20260430-02" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">דלג לתוכן</a>
@@ -139,7 +139,37 @@
             <p class="summary-panel__label">סיום</p>
             <p id="final-score" class="summary-panel__score">0</p>
             <p id="summary-copy" class="summary-panel__copy">מתוך 500</p>
+            <div class="summary-best">
+              <span class="summary-best__label">השיא שלך במכשיר הזה</span>
+              <strong id="personal-best-score" class="summary-best__value">0</strong>
+              <p id="personal-best-copy" class="summary-best__copy"></p>
+            </div>
             <div id="summary-rounds" class="summary-rounds"></div>
+            <section class="leaderboard-card" aria-labelledby="leaderboard-title">
+              <div class="leaderboard-card__header">
+                <div>
+                  <p class="leaderboard-card__eyebrow">טבלת שיאים</p>
+                  <h3 id="leaderboard-title" class="leaderboard-card__title">המובילים</h3>
+                </div>
+                <button
+                  id="leaderboard-edit-name-button"
+                  class="text-button"
+                  type="button"
+                >
+                  ערוך שם
+                </button>
+              </div>
+              <p id="leaderboard-profile" class="leaderboard-profile"></p>
+              <p id="leaderboard-feedback" class="leaderboard-feedback"></p>
+              <ol id="leaderboard-list" class="leaderboard-list"></ol>
+              <button
+                id="leaderboard-submit-button"
+                class="secondary-button"
+                type="button"
+              >
+                שלח לטבלה
+              </button>
+            </section>
             <button id="restart-button" class="primary-button" type="button">שחק שוב</button>
           </section>
         </section>
@@ -148,6 +178,42 @@
       </main>
     </div>
 
-    <script type="module" src="./app.js?v=20260429-24"></script>
+    <div
+      id="name-modal"
+      class="modal panel-hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="name-modal-title"
+    >
+      <div id="name-modal-backdrop" class="modal__backdrop"></div>
+      <div class="modal__dialog">
+        <p class="modal__eyebrow">לטבלת השיאים</p>
+        <h2 id="name-modal-title" class="modal__title">איך נרשום אותך?</h2>
+        <p id="name-modal-copy" class="modal__copy">השם יישמר במכשיר הזה לשימוש בפעמים הבאות.</p>
+        <form id="name-form" class="modal__form">
+          <label class="modal__label" for="display-name-input">שם לתוצאה</label>
+          <input
+            id="display-name-input"
+            class="modal__input"
+            name="displayName"
+            type="text"
+            maxlength="20"
+            autocomplete="nickname"
+            inputmode="text"
+          />
+          <p id="name-error" class="modal__error"></p>
+          <div class="modal__actions">
+            <button id="name-cancel-button" class="ghost-button" type="button">ביטול</button>
+            <button id="name-save-button" class="primary-button modal__submit" type="submit">
+              שמור
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="./runtime-config.js?v=20260430-02"></script>
+    <script type="module" src="./app.js?v=20260430-02"></script>
   </body>
 </html>

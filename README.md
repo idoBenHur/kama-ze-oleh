@@ -81,3 +81,15 @@ node scripts/build-static-catalog.js
 ```bash
 python -m http.server 3000 -d public
 ```
+## Leaderboard and Personal Best
+
+This project now includes an optional Supabase-backed leaderboard while keeping the site static on Vercel.
+
+- The browser reads `window.__APP_CONFIG__.supabaseUrl`
+- The browser reads `window.__APP_CONFIG__.supabasePublishableKey`
+- Vercel generates `public/runtime-config.js` during `npm run build`
+- Local personal best stays browser/device scoped in v1
+
+Setup guide:
+
+- [`SUPABASE_SETUP.md`](</C:/Users/Ido/Documents/codex proj/online comapre game/SUPABASE_SETUP.md>)
