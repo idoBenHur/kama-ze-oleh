@@ -796,6 +796,10 @@ output {
   padding: 1rem;
 }
 
+.modal.panel-hidden {
+  display: none;
+}
+
 .modal__backdrop {
   position: absolute;
   inset: 0;
