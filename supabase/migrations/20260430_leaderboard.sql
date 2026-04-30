@@ -79,7 +79,13 @@ select
   player_profiles.id as player_id,
   player_profiles.display_name,
   player_profiles.best_score,
-  player_profiles.best_score_at
+  player_profiles.best_score_at,
+  row_number() over (
+    order by
+      player_profiles.best_score desc,
+      player_profiles.best_score_at asc,
+      player_profiles.id asc
+  ) as rank
 from public.player_profiles
 where player_profiles.display_name is not null
   and player_profiles.best_score > 0

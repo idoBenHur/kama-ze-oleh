@@ -8,7 +8,7 @@
       content="בוא לבדוק האם אתה באמת יודע כמה דברים עולים בסופר."
     />
     <title>כמה זה עולה?</title>
-    <link rel="stylesheet" href="./styles.css?v=20260430-03" />
+    <link rel="stylesheet" href="./styles.css?v=20260430-04" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">דלג לתוכן</a>
@@ -23,6 +23,13 @@
           <div class="hud__center">
             <h1 class="hud__title">כמה זה עולה?</h1>
             <div id="progress-dots" class="progress-dots" aria-hidden="true"></div>
+            <button
+              id="hud-leaderboard-button"
+              class="hud__leaderboard-button text-button panel-hidden"
+              type="button"
+            >
+              טבלת שיאים
+            </button>
           </div>
 
           <div class="hud__metric hud__metric--accent">
@@ -145,11 +152,37 @@
               <p id="personal-best-copy" class="summary-best__copy"></p>
             </div>
             <div id="summary-rounds" class="summary-rounds"></div>
-            <section class="leaderboard-card" aria-labelledby="leaderboard-title">
-              <div class="leaderboard-card__header">
+            <p id="summary-sync-status" class="summary-sync-status"></p>
+            <div class="summary-actions">
+              <button id="summary-leaderboard-button" class="secondary-button" type="button">
+                טבלת שיאים
+              </button>
+              <button id="restart-button" class="primary-button" type="button">שחק שוב</button>
+            </div>
+          </section>
+
+          <section
+            id="leaderboard-panel"
+            class="leaderboard-panel panel-hidden"
+            aria-labelledby="leaderboard-screen-title"
+          >
+            <div class="leaderboard-screen__header">
+              <div>
+                <p class="leaderboard-card__eyebrow">טבלת שיאים</p>
+                <h2 id="leaderboard-screen-title" class="leaderboard-card__title">
+                  המובילים בכל הזמנים
+                </h2>
+              </div>
+              <button id="leaderboard-back-button" class="text-button" type="button">חזרה</button>
+            </div>
+
+            <section class="leaderboard-player-card" aria-labelledby="leaderboard-player-title">
+              <div class="leaderboard-player-card__header">
                 <div>
-                  <p class="leaderboard-card__eyebrow">טבלת שיאים</p>
-                  <h3 id="leaderboard-title" class="leaderboard-card__title">המובילים</h3>
+                  <p class="leaderboard-card__eyebrow">השחקן שלך</p>
+                  <h3 id="leaderboard-player-title" class="leaderboard-player-card__title">
+                    <span id="leaderboard-player-name">ללא שם</span>
+                  </h3>
                 </div>
                 <button
                   id="leaderboard-edit-name-button"
@@ -159,18 +192,31 @@
                   ערוך שם
                 </button>
               </div>
+
+              <div class="leaderboard-player-card__stats">
+                <div class="leaderboard-player-stat">
+                  <span class="leaderboard-player-stat__label">שיא מסונכרן</span>
+                  <strong id="leaderboard-player-best" class="leaderboard-player-stat__value">0</strong>
+                </div>
+                <div class="leaderboard-player-stat">
+                  <span class="leaderboard-player-stat__label">מקום נוכחי</span>
+                  <strong id="leaderboard-player-rank" class="leaderboard-player-stat__value">—</strong>
+                </div>
+              </div>
+
               <p id="leaderboard-profile" class="leaderboard-profile"></p>
               <p id="leaderboard-feedback" class="leaderboard-feedback"></p>
-              <ol id="leaderboard-list" class="leaderboard-list"></ol>
-              <button
-                id="leaderboard-submit-button"
-                class="secondary-button"
-                type="button"
-              >
-                שלח לטבלה
-              </button>
             </section>
-            <button id="restart-button" class="primary-button" type="button">שחק שוב</button>
+
+            <section class="leaderboard-card" aria-labelledby="leaderboard-title">
+              <div class="leaderboard-card__header">
+                <div>
+                  <p class="leaderboard-card__eyebrow">10 הגדולים</p>
+                  <h3 id="leaderboard-title" class="leaderboard-card__title">לוח השיאים</h3>
+                </div>
+              </div>
+              <ol id="leaderboard-list" class="leaderboard-list"></ol>
+            </section>
           </section>
         </section>
 
@@ -213,7 +259,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="./runtime-config.js?v=20260430-03"></script>
-    <script type="module" src="./app.js?v=20260430-03"></script>
+    <script src="./runtime-config.js?v=20260430-04"></script>
+    <script type="module" src="./app.js?v=20260430-04"></script>
   </body>
 </html>

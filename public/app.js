@@ -14,7 +14,7 @@ const LEADERBOARD_LIMIT = 10;
 const LOCAL_STORAGE_KEYS = {
   displayName: "kzo.displayName",
   personalBest: "kzo.personalBest",
-  lastLeaderboardResult: "kzo.lastLeaderboardResult"
+  leaderboardProfile: "kzo.lastLeaderboardResult"
 };
 const SUPABASE_FUNCTION_NAME = "submit-score";
 const DISPLAY_NAME_PATTERN = /^[\p{L}\p{N}_ -]+$/u;
@@ -57,12 +57,17 @@ const state = {
   leaderboardSubmitting: false,
   leaderboardFeedback: "",
   leaderboardFeedbackTone: "neutral",
+  summarySyncMessage: "",
+  summarySyncTone: "neutral",
+  leaderboardReturnView: null,
+  summarySnapshot: null,
   pendingNameAction: null,
   playerProfile: {
     displayName: "",
     personalBest: 0,
     personalBestAt: "",
-    lastLeaderboardResult: null
+    personalBestRecord: null,
+    leaderboardProfile: null
   },
   view: "loading"
 };
@@ -81,6 +86,8 @@ const elements = {
   guessSubmit: document.querySelector("#guess-submit"),
   guessValue: document.querySelector("#guess-value"),
   guessWholeSlider: document.querySelector("#guess-whole-slider"),
+  hudLeaderboardButton: document.querySelector("#hud-leaderboard-button"),
+  leaderboardBackButton: document.querySelector("#leaderboard-back-button"),
   nextButton: document.querySelector("#next-button"),
   priceList: document.querySelector("#price-list"),
   productMeta: document.querySelector("#product-meta"),
@@ -91,8 +98,11 @@ const elements = {
   leaderboardEditNameButton: document.querySelector("#leaderboard-edit-name-button"),
   leaderboardFeedback: document.querySelector("#leaderboard-feedback"),
   leaderboardList: document.querySelector("#leaderboard-list"),
+  leaderboardPanel: document.querySelector("#leaderboard-panel"),
+  leaderboardPlayerBest: document.querySelector("#leaderboard-player-best"),
+  leaderboardPlayerName: document.querySelector("#leaderboard-player-name"),
+  leaderboardPlayerRank: document.querySelector("#leaderboard-player-rank"),
   leaderboardProfile: document.querySelector("#leaderboard-profile"),
-  leaderboardSubmitButton: document.querySelector("#leaderboard-submit-button"),
   nameCancelButton: document.querySelector("#name-cancel-button"),
   nameError: document.querySelector("#name-error"),
   nameForm: document.querySelector("#name-form"),
@@ -110,8 +120,10 @@ const elements = {
   roundIndicator: document.querySelector("#round-indicator"),
   roundScore: document.querySelector("#round-score"),
   summaryCopy: document.querySelector("#summary-copy"),
+  summaryLeaderboardButton: document.querySelector("#summary-leaderboard-button"),
   summaryPanel: document.querySelector("#summary-panel"),
   summaryRounds: document.querySelector("#summary-rounds"),
+  summarySyncStatus: document.querySelector("#summary-sync-status"),
   totalScore: document.querySelector("#total-score")
 };
 
@@ -179,9 +191,128 @@ function validateDisplayName(displayName) {
   return { normalized };
 }
 
+function normalizeLeaderboardProfileRecord(record) {
+  if (!record || typeof record !== "object") {
+    return null;
+  }
+
+  return {
+    displayName: typeof record.displayName === "string" ? record.displayName : "",
+    bestScore: typeof record.bestScore === "number" ? record.bestScore : 0,
+    rank: Number.isInteger(record.rank)
+      ? record.rank
+      : Number.isInteger(record.leaderboardRank)
+        ? record.leaderboardRank
+        : null,
+    bestScoreAt: typeof record.bestScoreAt === "string" ? record.bestScoreAt : "",
+    fetchedAt:
+      typeof record.fetchedAt === "string"
+        ? record.fetchedAt
+        : typeof record.submittedAt === "string"
+          ? record.submittedAt
+          : ""
+  };
+}
+
+function buildStoredSubmissionPayload({
+  submissionType,
+  score,
+  rounds = null,
+  achievedAt = null,
+  catalogUpdatedAt = null
+}) {
+  const payload = {
+    submissionType,
+    score,
+    catalogUpdatedAt
+  };
+
+  if (submissionType === "run") {
+    payload.rounds = Array.isArray(rounds) ? rounds : [];
+  } else {
+    payload.legacyAchievedAt = achievedAt;
+  }
+
+  return payload;
+}
+
+function normalizePersonalBestRecord(record, cachedLeaderboardBest = 0) {
+  if (!record || typeof record !== "object" || typeof record.score !== "number" || record.score <= 0) {
+    return null;
+  }
+
+  const achievedAt = typeof record.achievedAt === "string" ? record.achievedAt : "";
+  const submissionSource =
+    record.submissionSource === "run" || record.submissionSource === "legacy_local_best"
+      ? record.submissionSource
+      : "legacy_local_best";
+  const syncStatus =
+    record.syncStatus === "pending" || record.syncStatus === "synced"
+      ? record.syncStatus
+      : record.score > cachedLeaderboardBest
+        ? "pending"
+        : "synced";
+
+  return {
+    score: record.score,
+    achievedAt,
+    submissionSource,
+    syncStatus,
+    payload:
+      record.payload && typeof record.payload === "object"
+        ? record.payload
+        : buildStoredSubmissionPayload({
+            submissionType: submissionSource,
+            score: record.score,
+            achievedAt
+          })
+  };
+}
+
+function applyPersonalBestRecord(record) {
+  state.playerProfile.personalBestRecord = record;
+  state.playerProfile.personalBest = record?.score ?? 0;
+  state.playerProfile.personalBestAt = record?.achievedAt ?? "";
+}
+
+function persistPersonalBestRecord(record) {
+  applyPersonalBestRecord(record);
+
+  if (!record) {
+    try {
+      window.localStorage.removeItem(LOCAL_STORAGE_KEYS.personalBest);
+    } catch {}
+    return;
+  }
+
+  writeStoredJson(LOCAL_STORAGE_KEYS.personalBest, record);
+}
+
+function persistLeaderboardProfile(profile) {
+  state.playerProfile.leaderboardProfile = profile;
+  writeStoredJson(LOCAL_STORAGE_KEYS.leaderboardProfile, profile);
+}
+
+function getSyncedLeaderboardBestScore() {
+  return state.playerProfile.leaderboardProfile?.bestScore ?? 0;
+}
+
+function markPersonalBestSyncedIfCovered(bestScore = getSyncedLeaderboardBestScore()) {
+  const record = state.playerProfile.personalBestRecord;
+  if (!record || record.syncStatus !== "pending" || record.score > bestScore) {
+    return;
+  }
+
+  persistPersonalBestRecord({
+    ...record,
+    syncStatus: "synced"
+  });
+}
+
 function loadLocalPlayerProfile() {
   const personalBestRecord = readStoredJson(LOCAL_STORAGE_KEYS.personalBest, null);
-  const lastLeaderboardResult = readStoredJson(LOCAL_STORAGE_KEYS.lastLeaderboardResult, null);
+  const leaderboardProfileRecord = readStoredJson(LOCAL_STORAGE_KEYS.leaderboardProfile, null);
+  const normalizedLeaderboardProfile = normalizeLeaderboardProfileRecord(leaderboardProfileRecord);
 
   try {
     state.playerProfile.displayName =
@@ -190,12 +321,10 @@ function loadLocalPlayerProfile() {
     state.playerProfile.displayName = "";
   }
 
-  state.playerProfile.personalBest =
-    typeof personalBestRecord?.score === "number" ? personalBestRecord.score : 0;
-  state.playerProfile.personalBestAt =
-    typeof personalBestRecord?.achievedAt === "string" ? personalBestRecord.achievedAt : "";
-  state.playerProfile.lastLeaderboardResult =
-    lastLeaderboardResult && typeof lastLeaderboardResult === "object" ? lastLeaderboardResult : null;
+  state.playerProfile.leaderboardProfile = normalizedLeaderboardProfile;
+  applyPersonalBestRecord(
+    normalizePersonalBestRecord(personalBestRecord, normalizedLeaderboardProfile?.bestScore ?? 0)
+  );
 }
 
 function persistDisplayName(displayName) {
@@ -206,7 +335,7 @@ function persistDisplayName(displayName) {
   } catch {}
 }
 
-function updateLocalPersonalBest(score) {
+function updateLocalPersonalBest(score, payload) {
   const achievedAt = new Date().toISOString();
   const previousBest = state.playerProfile.personalBest;
   const isNewLocalBest = score > previousBest;
@@ -215,19 +344,24 @@ function updateLocalPersonalBest(score) {
     return false;
   }
 
-  state.playerProfile.personalBest = score;
-  state.playerProfile.personalBestAt = achievedAt;
-  writeStoredJson(LOCAL_STORAGE_KEYS.personalBest, {
+  persistPersonalBestRecord({
     score,
-    achievedAt
+    achievedAt,
+    submissionSource: payload.submissionType,
+    syncStatus: score > getSyncedLeaderboardBestScore() ? "pending" : "synced",
+    payload: {
+      ...payload,
+      score
+    }
   });
 
   return true;
 }
 
-function storeLastLeaderboardResult(result) {
-  state.playerProfile.lastLeaderboardResult = result;
-  writeStoredJson(LOCAL_STORAGE_KEYS.lastLeaderboardResult, result);
+function getPendingPersonalBestPayload() {
+  return state.playerProfile.personalBestRecord?.syncStatus === "pending"
+    ? state.playerProfile.personalBestRecord.payload
+    : null;
 }
 
 function hide(element) {
@@ -646,10 +780,27 @@ function renderCatalogStamp() {
 function setLeaderboardFeedback(message, tone = "neutral") {
   state.leaderboardFeedback = message;
   state.leaderboardFeedbackTone = tone;
-  elements.leaderboardFeedback.textContent = message;
+}
+
+function setSummarySyncMessage(message, tone = "neutral") {
+  state.summarySyncMessage = message;
+  state.summarySyncTone = tone;
+}
+
+function renderSummarySyncStatus() {
+  elements.summarySyncStatus.textContent = state.summarySyncMessage;
+  elements.summarySyncStatus.className = "summary-sync-status";
+
+  if (state.summarySyncTone === "error") {
+    elements.summarySyncStatus.classList.add("summary-sync-status--error");
+  }
+}
+
+function renderLeaderboardFeedback() {
+  elements.leaderboardFeedback.textContent = state.leaderboardFeedback;
   elements.leaderboardFeedback.className = "leaderboard-feedback";
 
-  if (tone === "error") {
+  if (state.leaderboardFeedbackTone === "error") {
     elements.leaderboardFeedback.classList.add("leaderboard-feedback--error");
   }
 }
@@ -685,7 +836,7 @@ function renderLeaderboardList() {
 
     const rank = document.createElement("span");
     rank.className = "leaderboard-item__rank";
-    rank.textContent = `#${index + 1}`;
+    rank.textContent = `#${entry.rank ?? index + 1}`;
 
     const name = document.createElement("span");
     name.className = "leaderboard-item__name";
@@ -700,25 +851,33 @@ function renderLeaderboardList() {
   });
 }
 
-function renderLeaderboardControls() {
+function renderLeaderboardPanel() {
   const hasDisplayName = Boolean(state.playerProfile.displayName);
+  const leaderboardProfile = state.playerProfile.leaderboardProfile;
+  const pendingPayload = getPendingPersonalBestPayload();
+
+  elements.leaderboardPlayerName.textContent = hasDisplayName ? state.playerProfile.displayName : "ללא שם";
+  elements.leaderboardPlayerBest.textContent = String(leaderboardProfile?.bestScore ?? 0);
+  elements.leaderboardPlayerRank.textContent = leaderboardProfile?.rank
+    ? `#${leaderboardProfile.rank}`
+    : "—";
+  elements.leaderboardEditNameButton.textContent = hasDisplayName ? "ערוך שם" : "הוסף שם";
 
   if (!state.supabaseEnabled) {
     elements.leaderboardProfile.textContent = "הטבלה תופעל אחרי חיבור ל-Supabase.";
+  } else if (state.leaderboardSubmitting) {
+    elements.leaderboardProfile.textContent = "שומרים את השיא שלך בטבלה...";
+  } else if (pendingPayload) {
+    elements.leaderboardProfile.textContent = hasDisplayName
+      ? "יש שיא מקומי שמחכה לסנכרון. ננסה שוב אוטומטית."
+      : "בחרו שם כדי שנוכל לסנכרן את השיא המקומי שלכם.";
   } else if (hasDisplayName) {
     elements.leaderboardProfile.textContent = `נרשם כ: ${state.playerProfile.displayName}`;
   } else {
-    elements.leaderboardProfile.textContent = "נבקש שם רק כשתרצו לשלוח תוצאה.";
+    elements.leaderboardProfile.textContent = "עדיין לא נשמר שם לשחקן הזה.";
   }
 
-  elements.leaderboardSubmitButton.textContent = state.leaderboardSubmitting
-    ? "שולח..."
-    : hasDisplayName
-      ? "עדכן בטבלה"
-      : "שלח לטבלה";
-  elements.leaderboardSubmitButton.disabled = !state.supabaseEnabled || state.leaderboardSubmitting;
-
-  elements.leaderboardEditNameButton.textContent = hasDisplayName ? "ערוך שם" : "הוסף שם";
+  renderLeaderboardFeedback();
 }
 
 function renderSummaryBest(totalScore, isNewLocalBest) {
@@ -755,10 +914,10 @@ function openNameModal(mode) {
   elements.nameError.textContent = "";
   elements.displayNameInput.value = state.playerProfile.displayName;
 
-  if (mode === "submit") {
+  if (mode === "sync") {
     elements.nameModalTitle.textContent = "איך נרשום אותך?";
     elements.nameModalCopy.textContent = "השם יישמר במכשיר הזה וישמש אותך גם בפעם הבאה.";
-    elements.nameSaveButton.textContent = "שמור ושלח";
+    elements.nameSaveButton.textContent = "שמור והמשך";
   } else {
     elements.nameModalTitle.textContent = "עדכון שם";
     elements.nameModalCopy.textContent = "אפשר לעדכן את השם המקומי שלך לפני השליחה הבאה.";
@@ -788,7 +947,7 @@ async function ensureSupabaseClient() {
 
   if (!runtimeConfig.supabaseUrl || !runtimeConfig.supabasePublishableKey || !createClient) {
     state.supabaseEnabled = false;
-    renderLeaderboardControls();
+    renderLeaderboardPanel();
     renderLeaderboardList();
     return null;
   }
@@ -830,7 +989,8 @@ async function ensureSupabaseClient() {
     state.supabaseClient = client;
     state.supabaseReady = true;
     state.supabaseUserId = user?.id ?? null;
-    renderLeaderboardControls();
+    renderLeaderboardPanel();
+    void maybeAutoSyncPersonalBest({ allowPrompt: false, source: "app-load" });
 
     return client;
   })().catch((error) => {
@@ -838,6 +998,7 @@ async function ensureSupabaseClient() {
     state.supabaseReady = false;
     state.supabaseInitPromise = null;
     setLeaderboardFeedback("לא הצלחתי להתחבר לטבלת השיאים כרגע.", "error");
+    setSummarySyncMessage("לא הצלחנו להתחבר לטבלת השיאים כרגע.", "error");
     console.error(error);
     return null;
   });
@@ -845,45 +1006,92 @@ async function ensureSupabaseClient() {
   return state.supabaseInitPromise;
 }
 
-async function loadLeaderboardPreview() {
+async function fetchLeaderboardRows(client) {
+  let queryResult = await client
+    .from("public_leaderboard")
+    .select("player_id, display_name, best_score, best_score_at, rank")
+    .order("rank", { ascending: true });
+
+  if (queryResult.error) {
+    queryResult = await client
+      .from("public_leaderboard")
+      .select("player_id, display_name, best_score, best_score_at")
+      .order("best_score", { ascending: false })
+      .order("best_score_at", { ascending: true });
+  }
+
+  return {
+    data: (queryResult.data ?? []).map((entry, index) => ({
+      ...entry,
+      rank: Number.isInteger(entry.rank) ? entry.rank : index + 1
+    })),
+    error: queryResult.error
+  };
+}
+
+function syncLeaderboardProfileFromRows(rows) {
+  const matchingRow = rows.find((entry) => entry.player_id === state.supabaseUserId);
+
+  if (!matchingRow) {
+    if (!state.playerProfile.leaderboardProfile) {
+      persistLeaderboardProfile({
+        displayName: state.playerProfile.displayName,
+        bestScore: 0,
+        rank: null,
+        bestScoreAt: "",
+        fetchedAt: new Date().toISOString()
+      });
+    }
+    return;
+  }
+
+  persistLeaderboardProfile({
+    displayName: matchingRow.display_name ?? state.playerProfile.displayName,
+    bestScore: matchingRow.best_score,
+    rank: matchingRow.rank ?? null,
+    bestScoreAt: matchingRow.best_score_at ?? "",
+    fetchedAt: new Date().toISOString()
+  });
+  markPersonalBestSyncedIfCovered(matchingRow.best_score);
+}
+
+async function loadLeaderboardData({ triggerPendingSync = true } = {}) {
   state.leaderboardLoading = true;
-  renderLeaderboardControls();
+  renderLeaderboardPanel();
   renderLeaderboardList();
 
   const client = await ensureSupabaseClient();
   if (!client) {
     state.leaderboardLoading = false;
-    renderLeaderboardControls();
+    renderLeaderboardPanel();
     renderLeaderboardList();
     return;
   }
 
-  const { data, error } = await client
-    .from("public_leaderboard")
-    .select("player_id, display_name, best_score, best_score_at")
-    .order("best_score", { ascending: false })
-    .order("best_score_at", { ascending: true })
-    .limit(LEADERBOARD_LIMIT);
+  if (triggerPendingSync) {
+    await maybeAutoSyncPersonalBest({ allowPrompt: false, source: "leaderboard" });
+  }
+
+  const { data, error } = await fetchLeaderboardRows(client);
 
   state.leaderboardLoading = false;
 
   if (error) {
     state.leaderboardEntries = [];
     setLeaderboardFeedback("לא הצלחתי לטעון את טבלת השיאים.", "error");
-    renderLeaderboardControls();
+    renderLeaderboardPanel();
     renderLeaderboardList();
     return;
   }
 
-  state.leaderboardEntries = data ?? [];
+  syncLeaderboardProfileFromRows(data);
+  state.leaderboardEntries = data.slice(0, LEADERBOARD_LIMIT);
 
-  if (!state.leaderboardFeedback && state.playerProfile.lastLeaderboardResult?.leaderboardRank) {
-    setLeaderboardFeedback(
-      `המקום האחרון שלך: #${state.playerProfile.lastLeaderboardResult.leaderboardRank}`
-    );
+  if (!state.leaderboardFeedback && state.playerProfile.leaderboardProfile?.rank) {
+    setLeaderboardFeedback(`המקום האחרון שלך: #${state.playerProfile.leaderboardProfile.rank}`);
   }
 
-  renderLeaderboardControls();
+  renderLeaderboardPanel();
   renderLeaderboardList();
 }
 
@@ -896,31 +1104,47 @@ function buildSubmissionRounds() {
   }));
 }
 
-async function submitLeaderboardScore(displayNameOverride = null) {
-  if (!state.session || state.leaderboardSubmitting) {
+function buildCurrentRunSubmissionPayload() {
+  return buildStoredSubmissionPayload({
+    submissionType: "run",
+    score: state.session?.totalScore ?? 0,
+    rounds: buildSubmissionRounds(),
+    catalogUpdatedAt: state.catalog?.meta?.updatedAt ?? null
+  });
+}
+
+async function submitLeaderboardScore({ displayNameOverride = null, payloadOverride = null, source = "auto" } = {}) {
+  const payload = payloadOverride ?? buildCurrentRunSubmissionPayload();
+  if (!payload || state.leaderboardSubmitting) {
     return;
   }
 
   const client = await ensureSupabaseClient();
   if (!client) {
     setLeaderboardFeedback("טבלת השיאים לא זמינה כרגע.", "error");
+    if (source === "summary") {
+      setSummarySyncMessage("לא הצלחנו לשמור את השיא בטבלה כרגע.", "error");
+      renderSummarySyncStatus();
+    }
     return;
   }
 
   state.leaderboardSubmitting = true;
+  if (source === "summary") {
+    setSummarySyncMessage("שומרים את השיא שלך בטבלה...", "neutral");
+    renderSummarySyncStatus();
+  }
   setLeaderboardFeedback("");
-  renderLeaderboardControls();
+  renderLeaderboardPanel();
 
   const displayName = displayNameOverride ?? state.playerProfile.displayName;
-  const payload = {
-    score: state.session.totalScore,
-    rounds: buildSubmissionRounds(),
-    catalogUpdatedAt: state.catalog?.meta?.updatedAt ?? null,
+  const requestPayload = {
+    ...payload,
     ...(displayName ? { displayName } : {})
   };
 
   const { data, error } = await client.functions.invoke(SUPABASE_FUNCTION_NAME, {
-    body: payload
+    body: requestPayload
   });
 
   state.leaderboardSubmitting = false;
@@ -929,7 +1153,11 @@ async function submitLeaderboardScore(displayNameOverride = null) {
     const message = data?.error ?? error?.message ?? "שליחת התוצאה נכשלה.";
     const finalMessage = await resolveFunctionErrorMessage(message, error);
     setLeaderboardFeedback(finalMessage, "error");
-    renderLeaderboardControls();
+    if (source === "summary") {
+      setSummarySyncMessage("לא הצלחנו לשמור את השיא בטבלה כרגע. ננסה שוב אוטומטית.", "error");
+      renderSummarySyncStatus();
+    }
+    renderLeaderboardPanel();
     return;
   }
 
@@ -937,11 +1165,17 @@ async function submitLeaderboardScore(displayNameOverride = null) {
     persistDisplayName(data.displayName);
   }
 
-  storeLastLeaderboardResult({
-    bestScore: data.bestScore,
-    leaderboardRank: data.leaderboardRank,
-    submittedAt: new Date().toISOString()
+  persistLeaderboardProfile({
+    displayName: data.displayName ?? state.playerProfile.displayName,
+    bestScore: typeof data.bestScore === "number" ? data.bestScore : getSyncedLeaderboardBestScore(),
+    rank: Number.isInteger(data.leaderboardRank) ? data.leaderboardRank : null,
+    bestScoreAt:
+      data.isNewBest && payload.score === state.playerProfile.personalBest
+        ? state.playerProfile.personalBestAt
+        : state.playerProfile.leaderboardProfile?.bestScoreAt ?? "",
+    fetchedAt: new Date().toISOString()
   });
+  markPersonalBestSyncedIfCovered(data.bestScore);
 
   if (data.isNewBest && data.leaderboardRank) {
     setLeaderboardFeedback(`שיא חדש! כרגע אתה במקום #${data.leaderboardRank}`);
@@ -951,16 +1185,63 @@ async function submitLeaderboardScore(displayNameOverride = null) {
     setLeaderboardFeedback("התוצאה נשמרה בטבלה.");
   }
 
-  renderLeaderboardControls();
-  await loadLeaderboardPreview();
+  if (source === "summary") {
+    setSummarySyncMessage("השיא נשמר אוטומטית בטבלה.", "neutral");
+    renderSummarySyncStatus();
+  }
+
+  renderLeaderboardPanel();
+  await loadLeaderboardData({ triggerPendingSync: false });
+}
+
+async function maybeAutoSyncPersonalBest({ allowPrompt = false, source = "summary" } = {}) {
+  const pendingPayload = getPendingPersonalBestPayload();
+  if (!pendingPayload) {
+    if (source === "summary") {
+      setSummarySyncMessage("");
+      renderSummarySyncStatus();
+    }
+    return false;
+  }
+
+  if (pendingPayload.score <= getSyncedLeaderboardBestScore()) {
+    markPersonalBestSyncedIfCovered();
+    if (source === "summary") {
+      setSummarySyncMessage("");
+      renderSummarySyncStatus();
+    }
+    return false;
+  }
+
+  if (!state.playerProfile.displayName) {
+    if (source === "summary") {
+      setSummarySyncMessage("כדי לשמור את השיא בטבלה נבקש ממך שם חד-פעמי.");
+      renderSummarySyncStatus();
+    }
+
+    if (allowPrompt && !state.pendingNameAction) {
+      openNameModal("sync");
+    }
+    return false;
+  }
+
+  return submitLeaderboardScore({
+    payloadOverride: pendingPayload,
+    source
+  });
 }
 
 function renderProgressDots() {
   elements.progressDots.replaceChildren();
 
   const completed = state.session?.results.length ?? 0;
+  const leaderboardFromGuess = state.view === "leaderboard" && state.leaderboardReturnView === "guess";
   const activeIndex =
-    state.view === "guess" ? completed : state.view === "reveal" ? Math.max(completed - 1, 0) : -1;
+    state.view === "guess" || leaderboardFromGuess
+      ? completed
+      : state.view === "reveal"
+        ? Math.max(completed - 1, 0)
+        : -1;
 
   for (let index = 0; index < SESSION_ROUNDS; index += 1) {
     const dot = document.createElement("span");
@@ -980,11 +1261,19 @@ function renderProgressDots() {
 
 function renderHud() {
   const completed = state.session?.results.length ?? 0;
+  const leaderboardFromGuess = state.view === "leaderboard" && state.leaderboardReturnView === "guess";
   const roundNumber =
-    state.view === "guess" ? Math.min(completed + 1, SESSION_ROUNDS) : Math.min(completed, SESSION_ROUNDS);
+    state.view === "guess" || leaderboardFromGuess
+      ? Math.min(completed + 1, SESSION_ROUNDS)
+      : Math.min(completed, SESSION_ROUNDS);
 
   elements.roundIndicator.textContent = `${Math.max(roundNumber, 1)}/${SESSION_ROUNDS}`;
   elements.totalScore.textContent = String(state.session?.totalScore ?? 0);
+  if (state.view === "guess") {
+    show(elements.hudLeaderboardButton);
+  } else {
+    hide(elements.hudLeaderboardButton);
+  }
   renderProgressDots();
 }
 
@@ -1134,6 +1423,7 @@ function renderRound(round) {
   cancelRevealSequence();
   state.currentRound = round;
   state.view = "guess";
+  state.leaderboardReturnView = null;
 
   elements.chainTarget.textContent = round.selectedEntry.chainNameHe;
   elements.productName.textContent = round.product.canonicalNameHe;
@@ -1159,6 +1449,7 @@ function renderRound(round) {
   show(elements.guessForm);
   hide(elements.resultPanel);
   hide(elements.summaryPanel);
+  hide(elements.leaderboardPanel);
   elements.guessSubmit.disabled = false;
 
   renderHud();
@@ -1167,6 +1458,7 @@ function renderRound(round) {
 function renderReveal(reveal) {
   cancelRevealSequence();
   state.view = "reveal";
+  state.leaderboardReturnView = null;
 
   elements.resultDirection.className = `result-direction reveal-step result-direction--${reveal.feedback.tone}`;
   elements.resultDirection.textContent = reveal.feedback.directionHe;
@@ -1198,6 +1490,7 @@ function renderReveal(reveal) {
   resetRevealSequenceUI();
   hide(elements.guessForm);
   show(elements.resultPanel);
+  hide(elements.leaderboardPanel);
   renderHud();
 
   if (prefersReducedMotion.matches) {
@@ -1214,19 +1507,23 @@ function renderReveal(reveal) {
   animateActualPrice(reveal.actualPrice, reveal.roundScore);
 }
 
-function renderSummary() {
-  cancelRevealSequence();
+function renderSummaryView() {
+  if (!state.summarySnapshot) {
+    return;
+  }
+
   state.view = "summary";
   state.currentRound = null;
+  state.leaderboardReturnView = null;
 
-  const totalScore = state.session.totalScore;
-  const isNewLocalBest = updateLocalPersonalBest(totalScore);
+  const { totalScore, isNewLocalBest, results } = state.summarySnapshot;
   elements.finalScore.textContent = String(totalScore);
   elements.summaryCopy.textContent = `מתוך ${SESSION_ROUNDS * 100}`;
   renderSummaryBest(totalScore, isNewLocalBest);
+  renderSummarySyncStatus();
 
   elements.summaryRounds.replaceChildren();
-  for (const result of state.session.results) {
+  for (const result of results) {
     const chip = document.createElement("div");
     chip.className = "summary-round";
 
@@ -1245,12 +1542,51 @@ function renderSummary() {
   hide(elements.productPanel);
   hide(elements.guessForm);
   hide(elements.resultPanel);
+  hide(elements.leaderboardPanel);
   show(elements.summaryPanel);
-  renderLeaderboardControls();
-  renderLeaderboardList();
-  setLeaderboardFeedback("");
-  void loadLeaderboardPreview();
   renderHud();
+}
+
+function renderSummary() {
+  cancelRevealSequence();
+
+  const totalScore = state.session.totalScore;
+  const runPayload = buildCurrentRunSubmissionPayload();
+  const isNewLocalBest = updateLocalPersonalBest(totalScore, runPayload);
+  state.summarySnapshot = {
+    totalScore,
+    isNewLocalBest,
+    results: [...state.session.results]
+  };
+  setLeaderboardFeedback("");
+  setSummarySyncMessage("");
+  renderSummaryView();
+  void maybeAutoSyncPersonalBest({ allowPrompt: true, source: "summary" });
+}
+
+function openLeaderboardPanel(fromView) {
+  state.leaderboardReturnView = fromView;
+  state.view = "leaderboard";
+
+  hide(elements.guessForm);
+  hide(elements.resultPanel);
+  hide(elements.summaryPanel);
+  hide(elements.productPanel);
+  show(elements.leaderboardPanel);
+
+  renderLeaderboardPanel();
+  renderLeaderboardList();
+  renderHud();
+  void loadLeaderboardData();
+}
+
+function returnFromLeaderboard() {
+  if (state.leaderboardReturnView === "guess" && state.currentRound) {
+    renderRound(state.currentRound);
+    return;
+  }
+
+  renderSummaryView();
 }
 
 function resolveRound(guessValue) {
@@ -1305,6 +1641,10 @@ async function loadCatalog() {
 function startNewGame() {
   cancelRevealSequence();
   closeNameModal();
+  state.summarySnapshot = null;
+  state.leaderboardReturnView = null;
+  setLeaderboardFeedback("");
+  setSummarySyncMessage("");
   state.session = {
     totalScore: 0,
     results: [],
@@ -1337,8 +1677,9 @@ function startNextRound() {
 async function initializeApp() {
   elements.guessSubmit.disabled = true;
   loadLocalPlayerProfile();
-  renderLeaderboardControls();
+  renderLeaderboardPanel();
   renderLeaderboardList();
+  renderSummarySyncStatus();
 
   try {
     await loadCatalog();
@@ -1397,15 +1738,19 @@ elements.restartButton.addEventListener("click", () => {
   startNewGame();
 });
 
-elements.leaderboardSubmitButton.addEventListener("click", () => {
+elements.hudLeaderboardButton.addEventListener("click", () => {
   playClickSound();
+  openLeaderboardPanel("guess");
+});
 
-  if (!state.playerProfile.displayName) {
-    openNameModal("submit");
-    return;
-  }
+elements.summaryLeaderboardButton.addEventListener("click", () => {
+  playClickSound();
+  openLeaderboardPanel("summary");
+});
 
-  void submitLeaderboardScore();
+elements.leaderboardBackButton.addEventListener("click", () => {
+  playClickSound();
+  returnFromLeaderboard();
 });
 
 elements.leaderboardEditNameButton.addEventListener("click", () => {
@@ -1432,15 +1777,27 @@ elements.nameForm.addEventListener("submit", (event) => {
 
   const pendingNameAction = state.pendingNameAction;
   persistDisplayName(validation.normalized);
-  renderLeaderboardControls();
+  renderLeaderboardPanel();
   closeNameModal();
 
-  if (pendingNameAction === "submit") {
-    void submitLeaderboardScore(validation.normalized);
+  if (pendingNameAction === "sync") {
+    void maybeAutoSyncPersonalBest({
+      allowPrompt: false,
+      source: state.view === "leaderboard" ? "leaderboard" : "summary"
+    });
     return;
   }
 
-  setLeaderboardFeedback("השם המקומי עודכן. הוא יישלח בפעם הבאה שתעדכן תוצאה.");
+  if (getPendingPersonalBestPayload()) {
+    void maybeAutoSyncPersonalBest({
+      allowPrompt: false,
+      source: state.view === "leaderboard" ? "leaderboard" : "summary"
+    });
+    return;
+  }
+
+  setLeaderboardFeedback("השם המקומי עודכן. נשתמש בו בפעם הבאה שתשבור שיא.");
+  renderLeaderboardPanel();
 });
 
 renderHud();

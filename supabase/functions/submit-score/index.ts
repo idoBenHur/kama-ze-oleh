@@ -3,6 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const DISPLAY_NAME_PATTERN = /^[\p{L}\p{N}_ -]+$/u;
 const SESSION_ROUNDS = 5;
 const MAX_SCORE = 500;
+const LEGACY_SUBMISSION_TYPE = "legacy_local_best";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -15,6 +16,8 @@ type ScoreRound = {
   productId?: string;
   productNameHe?: string;
 };
+
+type SubmissionType = "run" | typeof LEGACY_SUBMISSION_TYPE;
 
 function isOptionalString(value: unknown) {
   return typeof value === "undefined" || typeof value === "string";
@@ -48,6 +51,19 @@ function validateDisplayName(displayName: string) {
   return { normalized };
 }
 
+function normalizeOptionalTimestamp(value: unknown) {
+  if (typeof value !== "string" || !value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed.toISOString();
+}
+
 function isValidRounds(rounds: unknown): rounds is ScoreRound[] {
   return (
     Array.isArray(rounds) &&
@@ -73,6 +89,33 @@ function isValidRounds(rounds: unknown): rounds is ScoreRound[] {
       }
     )
   );
+}
+
+async function fetchLeaderboardRows(serviceClient: ReturnType<typeof createClient>) {
+  const rankedResult = await serviceClient
+    .from("public_leaderboard")
+    .select("player_id, best_score, best_score_at, rank")
+    .order("rank", { ascending: true });
+  let data: Array<Record<string, unknown>> | null = rankedResult.data as Array<Record<string, unknown>> | null;
+  let error = rankedResult.error;
+
+  if (error) {
+    const fallbackResult = await serviceClient
+      .from("public_leaderboard")
+      .select("player_id, best_score, best_score_at")
+      .order("best_score", { ascending: false })
+      .order("best_score_at", { ascending: true });
+    data = fallbackResult.data as Array<Record<string, unknown>> | null;
+    error = fallbackResult.error;
+  }
+
+  return {
+    data: (data ?? []).map((row, index) => ({
+      ...row,
+      rank: Number.isInteger(row.rank) ? Number(row.rank) : index + 1
+    })),
+    error
+  };
 }
 
 Deno.serve(async (request) => {
@@ -113,10 +156,12 @@ Deno.serve(async (request) => {
   }
 
   let payload: {
+    submissionType?: SubmissionType;
     score?: number;
     rounds?: unknown;
     catalogUpdatedAt?: string | null;
     displayName?: string;
+    legacyAchievedAt?: string | null;
   };
 
   try {
@@ -129,7 +174,10 @@ Deno.serve(async (request) => {
     return jsonResponse({ error: "Score must be an integer between 0 and 500." }, 400);
   }
 
-  if (!isValidRounds(payload.rounds)) {
+  const submissionType: SubmissionType =
+    payload.submissionType === LEGACY_SUBMISSION_TYPE ? LEGACY_SUBMISSION_TYPE : "run";
+
+  if (submissionType === "run" && !isValidRounds(payload.rounds)) {
     return jsonResponse({ error: "Rounds payload must contain exactly 5 round results." }, 400);
   }
 
@@ -163,9 +211,12 @@ Deno.serve(async (request) => {
   }
 
   const isNewBest = !existingProfile || payload.score > existingProfile.best_score;
+  const legacyAchievedAt = normalizeOptionalTimestamp(payload.legacyAchievedAt);
   const bestScore = existingProfile ? Math.max(existingProfile.best_score, payload.score) : payload.score;
   const bestScoreAt = isNewBest
-    ? new Date().toISOString()
+    ? submissionType === LEGACY_SUBMISSION_TYPE && legacyAchievedAt
+      ? legacyAchievedAt
+      : new Date().toISOString()
     : existingProfile?.best_score_at ?? null;
 
   const { error: upsertError } = await serviceClient.from("player_profiles").upsert(
@@ -186,7 +237,7 @@ Deno.serve(async (request) => {
     player_id: user.id,
     display_name_snapshot: effectiveDisplayName,
     score: payload.score,
-    rounds: payload.rounds,
+    rounds: submissionType === LEGACY_SUBMISSION_TYPE ? [] : payload.rounds,
     catalog_updated_at: payload.catalogUpdatedAt ?? null
   });
 
@@ -194,17 +245,14 @@ Deno.serve(async (request) => {
     return jsonResponse({ error: "Could not save score submission." }, 500);
   }
 
-  const { data: leaderboardRows, error: leaderboardError } = await serviceClient
-    .from("public_leaderboard")
-    .select("player_id, best_score, best_score_at")
-    .order("best_score", { ascending: false })
-    .order("best_score_at", { ascending: true });
+  const { data: leaderboardRows, error: leaderboardError } = await fetchLeaderboardRows(serviceClient);
 
   if (leaderboardError) {
     return jsonResponse({ error: "Score saved, but leaderboard rank is unavailable." }, 200);
   }
 
-  const leaderboardRank = (leaderboardRows ?? []).findIndex((row) => row.player_id === user.id) + 1;
+  const leaderboardRank =
+    (leaderboardRows ?? []).find((row) => row.player_id === user.id)?.rank ?? null;
 
   return jsonResponse({
     accepted: true,

@@ -117,6 +117,16 @@ output {
   padding-block: 0;
 }
 
+.hud__leaderboard-button {
+  min-height: 1.5rem;
+  padding-inline: 0.7rem;
+  border-radius: var(--radius-sm);
+  background: rgba(88, 199, 132, 0.12);
+  border: 1px solid rgba(139, 224, 172, 0.14);
+  color: var(--accent-strong);
+  font-size: 0.76rem;
+}
+
 .hud__title {
   margin: 0;
   font-size: clamp(1.18rem, 5.8vw, 1.72rem);
@@ -675,6 +685,17 @@ output {
   font-weight: 700;
 }
 
+.summary-sync-status {
+  min-height: 1.2rem;
+  margin: 0.9rem 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.summary-sync-status--error {
+  color: var(--danger);
+}
+
 .summary-rounds {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -700,8 +721,39 @@ output {
   font-size: 1.05rem;
 }
 
+.summary-actions {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.95rem;
+}
+
+.summary-actions .primary-button,
+.summary-actions .secondary-button {
+  margin-top: 0;
+}
+
+.leaderboard-panel {
+  display: grid;
+  gap: 1rem;
+  margin-top: 0.7rem;
+  padding: 1rem;
+  border-radius: var(--radius-lg);
+  background: rgba(24, 36, 56, 0.82);
+}
+
+.leaderboard-panel.panel-hidden {
+  display: none;
+}
+
+.leaderboard-screen__header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.85rem;
+  text-align: right;
+}
+
 .leaderboard-card {
-  margin-top: 1rem;
   padding: 1rem;
   border-radius: var(--radius-md);
   background: rgba(31, 44, 66, 0.82);
@@ -724,6 +776,53 @@ output {
 .leaderboard-card__title {
   margin: 0.18rem 0 0;
   font-size: 1.1rem;
+}
+
+.leaderboard-player-card {
+  padding: 1rem;
+  border-radius: var(--radius-md);
+  background: rgba(31, 44, 66, 0.82);
+  text-align: right;
+}
+
+.leaderboard-player-card__header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.leaderboard-player-card__title {
+  margin: 0.18rem 0 0;
+  font-size: 1.12rem;
+}
+
+.leaderboard-player-card__stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+}
+
+.leaderboard-player-stat {
+  padding: 0.78rem 0.85rem;
+  border-radius: 0.95rem;
+  background: rgba(43, 59, 86, 0.84);
+  border: 1px solid rgba(167, 201, 220, 0.12);
+}
+
+.leaderboard-player-stat__label {
+  display: block;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.leaderboard-player-stat__value {
+  display: block;
+  margin-top: 0.22rem;
+  font-size: 1.2rem;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .leaderboard-profile,
@@ -1022,7 +1121,12 @@ output {
     grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
+  .leaderboard-player-card__stats {
+    grid-template-columns: 1fr;
+  }
+
   .summary-best,
+  .leaderboard-player-card,
   .leaderboard-card {
     padding: 0.85rem;
   }
