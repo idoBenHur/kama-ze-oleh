@@ -4,6 +4,7 @@ const DISPLAY_NAME_PATTERN = /^[\p{L}\p{N}_ -]+$/u;
 const SESSION_ROUNDS = 5;
 const MAX_SCORE = 500;
 const LEGACY_SUBMISSION_TYPE = "legacy_local_best";
+const DISPLAY_NAME_ONLY_SUBMISSION_TYPE = "display_name_only";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -17,7 +18,10 @@ type ScoreRound = {
   productNameHe?: string;
 };
 
-type SubmissionType = "run" | typeof LEGACY_SUBMISSION_TYPE;
+type SubmissionType =
+  | "run"
+  | typeof LEGACY_SUBMISSION_TYPE
+  | typeof DISPLAY_NAME_ONLY_SUBMISSION_TYPE;
 
 function isOptionalString(value: unknown) {
   return typeof value === "undefined" || typeof value === "string";
@@ -175,7 +179,11 @@ Deno.serve(async (request) => {
   }
 
   const submissionType: SubmissionType =
-    payload.submissionType === LEGACY_SUBMISSION_TYPE ? LEGACY_SUBMISSION_TYPE : "run";
+    payload.submissionType === LEGACY_SUBMISSION_TYPE
+      ? LEGACY_SUBMISSION_TYPE
+      : payload.submissionType === DISPLAY_NAME_ONLY_SUBMISSION_TYPE
+        ? DISPLAY_NAME_ONLY_SUBMISSION_TYPE
+        : "run";
 
   if (submissionType === "run" && !isValidRounds(payload.rounds)) {
     return jsonResponse({ error: "Rounds payload must contain exactly 5 round results." }, 400);
@@ -210,9 +218,29 @@ Deno.serve(async (request) => {
     return jsonResponse({ error: "Display name is required on first submission." }, 400);
   }
 
-  const isNewBest = !existingProfile || payload.score > existingProfile.best_score;
+  const { data: conflictingProfiles, error: conflictingProfileError } = await serviceClient
+    .from("player_profiles")
+    .select("id")
+    .neq("id", user.id)
+    .ilike("display_name", effectiveDisplayName)
+    .limit(1);
+
+  if (conflictingProfileError) {
+    return jsonResponse({ error: "Could not verify display name availability." }, 500);
+  }
+
+  if ((conflictingProfiles ?? []).length > 0) {
+    return jsonResponse({ error: "השם כבר תפוס. נסו שם אחר." }, 409);
+  }
+
+  const isScoreSubmission = submissionType !== DISPLAY_NAME_ONLY_SUBMISSION_TYPE;
+  const isNewBest = isScoreSubmission && (!existingProfile || payload.score > existingProfile.best_score);
   const legacyAchievedAt = normalizeOptionalTimestamp(payload.legacyAchievedAt);
-  const bestScore = existingProfile ? Math.max(existingProfile.best_score, payload.score) : payload.score;
+  const bestScore = isScoreSubmission
+    ? existingProfile
+      ? Math.max(existingProfile.best_score, payload.score)
+      : payload.score
+    : existingProfile?.best_score ?? 0;
   const bestScoreAt = isNewBest
     ? submissionType === LEGACY_SUBMISSION_TYPE && legacyAchievedAt
       ? legacyAchievedAt
@@ -233,16 +261,18 @@ Deno.serve(async (request) => {
     return jsonResponse({ error: "Could not save player profile." }, 500);
   }
 
-  const { error: submissionError } = await serviceClient.from("score_submissions").insert({
-    player_id: user.id,
-    display_name_snapshot: effectiveDisplayName,
-    score: payload.score,
-    rounds: submissionType === LEGACY_SUBMISSION_TYPE ? [] : payload.rounds,
-    catalog_updated_at: payload.catalogUpdatedAt ?? null
-  });
+  if (isScoreSubmission) {
+    const { error: submissionError } = await serviceClient.from("score_submissions").insert({
+      player_id: user.id,
+      display_name_snapshot: effectiveDisplayName,
+      score: payload.score,
+      rounds: submissionType === LEGACY_SUBMISSION_TYPE ? [] : payload.rounds,
+      catalog_updated_at: payload.catalogUpdatedAt ?? null
+    });
 
-  if (submissionError) {
-    return jsonResponse({ error: "Could not save score submission." }, 500);
+    if (submissionError) {
+      return jsonResponse({ error: "Could not save score submission." }, 500);
+    }
   }
 
   const { data: leaderboardRows, error: leaderboardError } = await fetchLeaderboardRows(serviceClient);

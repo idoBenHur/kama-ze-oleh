@@ -13,11 +13,24 @@ const FRACTION_GUESS_STEP = 10;
 const LEADERBOARD_LIMIT = 10;
 const LOCAL_STORAGE_KEYS = {
   displayName: "kzo.displayName",
+  displayNameSource: "kzo.displayNameSource",
   personalBest: "kzo.personalBest",
   leaderboardProfile: "kzo.lastLeaderboardResult"
 };
 const SUPABASE_FUNCTION_NAME = "submit-score";
 const DISPLAY_NAME_PATTERN = /^[\p{L}\p{N}_ -]+$/u;
+const DEFAULT_DISPLAY_NAME_OPTIONS = [
+  "מלך השניצל",
+  "רק ביסלי",
+  "קיסר הקוטג",
+  "אלוף הפלאפל",
+  "בוס הבורקס",
+  "נסיך החומוס",
+  "מאסטר הבמבה",
+  "רב הקוסקוס",
+  "שר הטוסט",
+  "תותח הבייגלה"
+];
 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
 const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
@@ -65,6 +78,7 @@ const state = {
   pendingNameAction: null,
   playerProfile: {
     displayName: "",
+    displayNameSource: "generated",
     personalBest: 0,
     personalBestAt: "",
     personalBestRecord: null,
@@ -192,6 +206,27 @@ function validateDisplayName(displayName) {
   return { normalized };
 }
 
+function generateDefaultDisplayName(excludedNames = []) {
+  const blockedNames = new Set(excludedNames.filter(Boolean));
+
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    const baseName =
+      DEFAULT_DISPLAY_NAME_OPTIONS[Math.floor(Math.random() * DEFAULT_DISPLAY_NAME_OPTIONS.length)];
+    const suffix = String(Math.floor(Math.random() * 90) + 10);
+    const candidate = `${baseName} ${suffix}`;
+
+    if (candidate.length <= 20 && !blockedNames.has(candidate)) {
+      return candidate;
+    }
+  }
+
+  return `לקוח סופר ${Math.floor(Math.random() * 900 + 100)}`;
+}
+
+function isDisplayNameTakenMessage(message) {
+  return typeof message === "string" && message.includes("השם כבר תפוס");
+}
+
 function normalizeLeaderboardProfileRecord(record) {
   if (!record || typeof record !== "object") {
     return null;
@@ -314,12 +349,23 @@ function loadLocalPlayerProfile() {
   const personalBestRecord = readStoredJson(LOCAL_STORAGE_KEYS.personalBest, null);
   const leaderboardProfileRecord = readStoredJson(LOCAL_STORAGE_KEYS.leaderboardProfile, null);
   const normalizedLeaderboardProfile = normalizeLeaderboardProfileRecord(leaderboardProfileRecord);
+  let storedDisplayName = "";
 
   try {
-    state.playerProfile.displayName =
-      window.localStorage.getItem(LOCAL_STORAGE_KEYS.displayName) ?? "";
+    storedDisplayName = window.localStorage.getItem(LOCAL_STORAGE_KEYS.displayName) ?? "";
+    const storedDisplayNameSource = window.localStorage.getItem(LOCAL_STORAGE_KEYS.displayNameSource);
+    state.playerProfile.displayNameSource =
+      storedDisplayNameSource === "generated"
+        ? "generated"
+        : storedDisplayName ? "custom" : "generated";
   } catch {
-    state.playerProfile.displayName = "";
+    state.playerProfile.displayNameSource = "generated";
+  }
+
+  if (storedDisplayName) {
+    state.playerProfile.displayName = storedDisplayName;
+  } else {
+    persistDisplayName(generateDefaultDisplayName(), "generated");
   }
 
   state.playerProfile.leaderboardProfile = normalizedLeaderboardProfile;
@@ -328,12 +374,20 @@ function loadLocalPlayerProfile() {
   );
 }
 
-function persistDisplayName(displayName) {
+function persistDisplayName(displayName, source = state.playerProfile.displayNameSource ?? "custom") {
   state.playerProfile.displayName = displayName;
+  state.playerProfile.displayNameSource = source;
 
   try {
     window.localStorage.setItem(LOCAL_STORAGE_KEYS.displayName, displayName);
+    window.localStorage.setItem(LOCAL_STORAGE_KEYS.displayNameSource, source);
   } catch {}
+}
+
+function generateAndPersistDefaultDisplayName(excludedNames = []) {
+  const nextName = generateDefaultDisplayName([state.playerProfile.displayName, ...excludedNames]);
+  persistDisplayName(nextName, "generated");
+  return nextName;
 }
 
 function updateLocalPersonalBest(score, payload) {
@@ -919,7 +973,7 @@ function openNameModal(mode) {
     elements.nameSaveButton.textContent = "שמור והמשך";
   } else {
     elements.nameModalTitle.textContent = "עדכון שם";
-    elements.nameModalCopy.textContent = "אפשר לעדכן את השם המקומי שלך לפני השליחה הבאה.";
+    elements.nameModalCopy.textContent = "אפשר לעדכן את השם שלך כאן. אם השם תפוס נבקש לבחור אחר.";
     elements.nameSaveButton.textContent = "שמור שם";
   }
 
@@ -1108,7 +1162,55 @@ function buildCurrentRunSubmissionPayload() {
   });
 }
 
-async function submitLeaderboardScore({ displayNameOverride = null, payloadOverride = null, source = "auto" } = {}) {
+async function saveDisplayNameChoice(displayName) {
+  const normalizedDisplayName = normalizeDisplayName(displayName);
+  const client = await ensureSupabaseClient();
+
+  if (!client) {
+    persistDisplayName(normalizedDisplayName, "custom");
+    renderLeaderboardPanel();
+    return { ok: true };
+  }
+
+  const { data, error } = await client.functions.invoke(SUPABASE_FUNCTION_NAME, {
+    body: {
+      submissionType: "display_name_only",
+      score: state.playerProfile.personalBest,
+      displayName: normalizedDisplayName
+    }
+  });
+
+  if (error || !data?.accepted) {
+    const message = data?.error ?? error?.message ?? "לא הצלחתי לשמור את השם.";
+    return {
+      ok: false,
+      error: await resolveFunctionErrorMessage(message, error)
+    };
+  }
+
+  persistDisplayName(data.displayName ?? normalizedDisplayName, "custom");
+  persistLeaderboardProfile({
+    displayName: data.displayName ?? normalizedDisplayName,
+    bestScore:
+      typeof data.bestScore === "number"
+        ? data.bestScore
+        : state.playerProfile.leaderboardProfile?.bestScore ?? 0,
+    rank: Number.isInteger(data.leaderboardRank)
+      ? data.leaderboardRank
+      : state.playerProfile.leaderboardProfile?.rank ?? null,
+    bestScoreAt: state.playerProfile.leaderboardProfile?.bestScoreAt ?? "",
+    fetchedAt: new Date().toISOString()
+  });
+
+  return { ok: true };
+}
+
+async function submitLeaderboardScore({
+  displayNameOverride = null,
+  payloadOverride = null,
+  source = "auto",
+  attempt = 0
+} = {}) {
   const payload = payloadOverride ?? buildCurrentRunSubmissionPayload();
   if (!payload || state.leaderboardSubmitting) {
     return;
@@ -1147,9 +1249,30 @@ async function submitLeaderboardScore({ displayNameOverride = null, payloadOverr
   if (error || !data?.accepted) {
     const message = data?.error ?? error?.message ?? "שליחת התוצאה נכשלה.";
     const finalMessage = await resolveFunctionErrorMessage(message, error);
+
+    if (
+      isDisplayNameTakenMessage(finalMessage) &&
+      !displayNameOverride &&
+      state.playerProfile.displayNameSource === "generated" &&
+      attempt < 4
+    ) {
+      generateAndPersistDefaultDisplayName();
+      renderLeaderboardPanel();
+      return submitLeaderboardScore({
+        payloadOverride: payload,
+        source,
+        attempt: attempt + 1
+      });
+    }
+
     setLeaderboardFeedback(finalMessage, "error");
     if (source === "summary") {
-      setSummarySyncMessage("לא הצלחנו לשמור את השיא בטבלה כרגע. ננסה שוב אוטומטית.", "error");
+      setSummarySyncMessage(
+        isDisplayNameTakenMessage(finalMessage)
+          ? "השם שלך כבר תפוס. אפשר לשנות אותו בעשרת המובילים."
+          : "לא הצלחנו לשמור את השיא בטבלה כרגע. ננסה שוב אוטומטית.",
+        "error"
+      );
       renderSummarySyncStatus();
     }
     renderLeaderboardPanel();
@@ -1157,7 +1280,7 @@ async function submitLeaderboardScore({ displayNameOverride = null, payloadOverr
   }
 
   if (typeof data.displayName === "string" && data.displayName) {
-    persistDisplayName(data.displayName);
+    persistDisplayName(data.displayName, state.playerProfile.displayNameSource);
   }
 
   persistLeaderboardProfile({
@@ -1209,15 +1332,8 @@ async function maybeAutoSyncPersonalBest({ allowPrompt = false, source = "summar
   }
 
   if (!state.playerProfile.displayName) {
-    if (source === "summary") {
-      setSummarySyncMessage("כדי לשמור את השיא בטבלה נבקש ממך שם חד-פעמי.");
-      renderSummarySyncStatus();
-    }
-
-    if (allowPrompt && !state.pendingNameAction) {
-      openNameModal("sync");
-    }
-    return false;
+    generateAndPersistDefaultDisplayName();
+    renderLeaderboardPanel();
   }
 
   return submitLeaderboardScore({
@@ -1767,7 +1883,7 @@ elements.nameModalBackdrop.addEventListener("click", () => {
   closeNameModal();
 });
 
-elements.nameForm.addEventListener("submit", (event) => {
+elements.nameForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const validation = validateDisplayName(elements.displayNameInput.value);
@@ -1777,7 +1893,29 @@ elements.nameForm.addEventListener("submit", (event) => {
   }
 
   const pendingNameAction = state.pendingNameAction;
-  persistDisplayName(validation.normalized);
+  if (pendingNameAction === "edit") {
+    const chosenName = validation.normalized;
+    const currentName = state.playerProfile.displayName;
+
+    if (chosenName === currentName && state.playerProfile.displayNameSource === "custom") {
+      closeNameModal();
+      return;
+    }
+
+    const result = await saveDisplayNameChoice(chosenName);
+    if (!result.ok) {
+      elements.nameError.textContent = result.error;
+      return;
+    }
+
+    closeNameModal();
+    setLeaderboardFeedback("השם נשמר.");
+    renderLeaderboardPanel();
+    await loadLeaderboardData({ triggerPendingSync: false });
+    return;
+  }
+
+  persistDisplayName(validation.normalized, "custom");
   renderLeaderboardPanel();
   closeNameModal();
 
