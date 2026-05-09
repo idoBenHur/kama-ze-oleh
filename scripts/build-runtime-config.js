@@ -5,7 +5,8 @@ const outputPath = resolve("public", "runtime-config.js");
 
 const runtimeConfig = {
   supabaseUrl: process.env.SUPABASE_URL ?? "",
-  supabasePublishableKey: process.env.SUPABASE_PUBLISHABLE_KEY ?? ""
+  supabasePublishableKey: process.env.SUPABASE_PUBLISHABLE_KEY ?? "",
+  gaMeasurementId: process.env.GA_MEASUREMENT_ID ?? ""
 };
 
 const fileContents = `window.__APP_CONFIG__ = Object.freeze(${JSON.stringify(

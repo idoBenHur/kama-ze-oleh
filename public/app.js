@@ -19,6 +19,7 @@ const LOCAL_STORAGE_KEYS = {
 };
 const SUPABASE_FUNCTION_NAME = "submit-score";
 const DISPLAY_NAME_PATTERN = /^[\p{L}\p{N}_ -]+$/u;
+const ANALYTICS_SYNC_ERROR_NONE = "none";
 const DEFAULT_DISPLAY_NAME_OPTIONS = [
   "מלך השניצל",
   "רק ביסלי",
@@ -165,8 +166,66 @@ function getRuntimeConfig() {
   return {
     supabaseUrl: typeof appConfig.supabaseUrl === "string" ? appConfig.supabaseUrl : "",
     supabasePublishableKey:
-      typeof appConfig.supabasePublishableKey === "string" ? appConfig.supabasePublishableKey : ""
+      typeof appConfig.supabasePublishableKey === "string" ? appConfig.supabasePublishableKey : "",
+    gaMeasurementId: typeof appConfig.gaMeasurementId === "string" ? appConfig.gaMeasurementId : ""
   };
+}
+
+function initializeAnalytics() {
+  return window.KZOAnalytics?.init?.(getRuntimeConfig()) ?? Promise.resolve(false);
+}
+
+function trackAnalyticsEvent(eventName, params = {}) {
+  window.KZOAnalytics?.trackEvent?.(eventName, params);
+}
+
+function normalizeLeaderboardSyncErrorType(message, error) {
+  if (isDisplayNameTakenMessage(message)) {
+    return "duplicate_name";
+  }
+
+  const combinedText = [message, error?.message, error?.context?.message]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (
+    combinedText.includes("unauthorized") ||
+    combinedText.includes("forbidden") ||
+    combinedText.includes("jwt") ||
+    combinedText.includes("permission") ||
+    combinedText.includes("auth")
+  ) {
+    return "unauthorized";
+  }
+
+  if (
+    combinedText.includes("failed to fetch") ||
+    combinedText.includes("network") ||
+    combinedText.includes("timeout") ||
+    combinedText.includes("fetch")
+  ) {
+    return "network";
+  }
+
+  if (
+    combinedText.includes("invalid") ||
+    combinedText.includes("validation") ||
+    combinedText.includes("score") ||
+    combinedText.includes("round") ||
+    combinedText.includes("name")
+  ) {
+    return "validation";
+  }
+
+  return "unknown";
+}
+
+function trackLeaderboardSyncResult(result, errorType = ANALYTICS_SYNC_ERROR_NONE) {
+  trackAnalyticsEvent("leaderboard_sync", {
+    result,
+    error_type: errorType
+  });
 }
 
 function readStoredJson(key, fallbackValue) {
@@ -1168,6 +1227,9 @@ async function saveDisplayNameChoice(displayName) {
 
   if (!client) {
     persistDisplayName(normalizedDisplayName, "custom");
+    trackAnalyticsEvent("leaderboard_name_saved", {
+      name_source: "custom"
+    });
     renderLeaderboardPanel();
     return { ok: true };
   }
@@ -1201,6 +1263,9 @@ async function saveDisplayNameChoice(displayName) {
     bestScoreAt: state.playerProfile.leaderboardProfile?.bestScoreAt ?? "",
     fetchedAt: new Date().toISOString()
   });
+  trackAnalyticsEvent("leaderboard_name_saved", {
+    name_source: "custom"
+  });
 
   return { ok: true };
 }
@@ -1219,6 +1284,7 @@ async function submitLeaderboardScore({
   const client = await ensureSupabaseClient();
   if (!client) {
     setLeaderboardFeedback("טבלת השיאים לא זמינה כרגע.", "error");
+    trackLeaderboardSyncResult("error", "network");
     if (source === "summary") {
       setSummarySyncMessage("לא הצלחנו לשמור את השיא בטבלה כרגע.", "error");
       renderSummarySyncStatus();
@@ -1266,6 +1332,7 @@ async function submitLeaderboardScore({
     }
 
     setLeaderboardFeedback(finalMessage, "error");
+    trackLeaderboardSyncResult("error", normalizeLeaderboardSyncErrorType(finalMessage, error));
     if (source === "summary") {
       setSummarySyncMessage(
         isDisplayNameTakenMessage(finalMessage)
@@ -1294,6 +1361,7 @@ async function submitLeaderboardScore({
     fetchedAt: new Date().toISOString()
   });
   markPersonalBestSyncedIfCovered(data.bestScore);
+  trackLeaderboardSyncResult("success");
 
   if (data.isNewBest && data.leaderboardRank) {
     setLeaderboardFeedback(`שיא חדש! כרגע אתה במקום #${data.leaderboardRank}`);
@@ -1669,6 +1737,16 @@ function renderSummary() {
   setLeaderboardFeedback("");
   setSummarySyncMessage("");
   renderSummaryView();
+  trackAnalyticsEvent("game_complete", {
+    score: totalScore,
+    is_personal_best: isNewLocalBest,
+    round_count: SESSION_ROUNDS
+  });
+  if (isNewLocalBest) {
+    trackAnalyticsEvent("personal_best_achieved", {
+      score: totalScore
+    });
+  }
   void maybeAutoSyncPersonalBest({ allowPrompt: true, source: "summary" });
 }
 
@@ -1685,6 +1763,9 @@ function openLeaderboardPanel(fromView) {
   hide(elements.summaryPanel);
   hide(elements.productPanel);
   show(elements.leaderboardPanel);
+  trackAnalyticsEvent("leaderboard_open", {
+    source_screen: fromView
+  });
 
   renderLeaderboardPanel();
   renderLeaderboardList();
@@ -1767,6 +1848,9 @@ function startNewGame() {
     results: [],
     usedProductIds: new Set()
   };
+  trackAnalyticsEvent("game_start", {
+    round_count: SESSION_ROUNDS
+  });
 
   startNextRound();
 }
@@ -1797,6 +1881,7 @@ async function initializeApp() {
   renderLeaderboardPanel();
   renderLeaderboardList();
   renderSummarySyncStatus();
+  void initializeAnalytics();
 
   try {
     await loadCatalog();
